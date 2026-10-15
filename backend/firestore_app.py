@@ -23,7 +23,7 @@ from firestore_ledger import PaperLedger
 async def lifespan(app: FastAPI):
     task = None
     if os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true":
-        from firestore_monitor import run_monitor
+        from leased_monitor import run as run_monitor
         task = asyncio.create_task(run_monitor(), name="sinka-paper-monitor")
     try:
         yield
