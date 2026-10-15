@@ -24,7 +24,7 @@ async def run():
                 if not await asyncio.to_thread(lease.acquire):
                     await asyncio.sleep(INTERVAL)
                     continue
-                status = await check_once(ledger)
+                status = await check_once(ledger, lease=lease)
                 if await asyncio.to_thread(lease.is_owner):
                     await asyncio.to_thread(write_heartbeat, ledger, status)
                 delay = INTERVAL
