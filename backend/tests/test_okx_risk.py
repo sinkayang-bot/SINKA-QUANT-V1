@@ -24,7 +24,7 @@ def test_valid_isolated_order_is_not_executable():
     {"stop": "101000"},
     {"price": "NaN"},
     {"equity_usdt": "0"},
-    {"contracts": "2"},
+    {"contracts": "3"},
 ])
 def test_invalid_orders_rejected(change):
     with pytest.raises(ValueError):
