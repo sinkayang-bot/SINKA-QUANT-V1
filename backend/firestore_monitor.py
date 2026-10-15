@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime, timezone
 
 from firestore_app import quote
 from firestore_ledger import PaperLedger
@@ -31,6 +32,14 @@ async def check_once(ledger):
     return "closed" if fill else "already_closed"
 
 
+def write_heartbeat(ledger, status):
+    """Persist worker liveness outside the container; failures must be observable."""
+    ledger.account.collection("runtime").document("monitor").set({
+        "last_check_at": datetime.now(timezone.utc),
+        "status": status,
+    }, merge=True)
+
+
 async def run_monitor():
     if not OWNER:
         raise RuntimeError("SINKA_OWNER_UID must be set before starting monitor")
@@ -39,12 +48,17 @@ async def run_monitor():
     while True:
         try:
             result = await check_once(ledger)
+            await asyncio.to_thread(write_heartbeat, ledger, result)
             logger.info("paper monitor status=%s", result)
             delay = INTERVAL
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("paper monitor failed; retrying")
+            try:
+                await asyncio.to_thread(write_heartbeat, ledger, "error")
+            except Exception:
+                logger.exception("failed to persist monitor error heartbeat")
             delay = min(max(delay * 2, INTERVAL), 60.0)
         await asyncio.sleep(delay)
 
