@@ -11,6 +11,7 @@ from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 DB = os.getenv("DB_PATH", "/data/paper.db")
@@ -116,6 +117,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SINKA QUANT Paper Engine", lifespan=lifespan)
+# Restrict browser requests to the SINKA QUANT dashboard origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://sinkayang-bot.github.io"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.get("/health")
