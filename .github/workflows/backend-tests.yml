@@ -30,26 +30,21 @@ jobs:
 
   firestore-emulator:
     runs-on: ubuntu-latest
-    services:
-      firestore:
-        image: google/cloud-sdk:emulators
-        ports:
-          - 8085:8085
-        options: >-
-          --health-cmd "bash -c 'echo > /dev/tcp/127.0.0.1/8085'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     env:
-      FIRESTORE_EMULATOR_HOST: localhost:8085
       GOOGLE_CLOUD_PROJECT: sinka-emulator
-    defaults:
-      run:
-        working-directory: backend
+      FIRESTORE_EMULATOR_HOST: 127.0.0.1:8085
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt pytest
-      - run: python -m pytest -q tests/test_lease_emulator.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pip install -r backend/requirements.txt pytest
+      - run: npm install --no-save firebase-tools
+      - run: npx firebase emulators:exec --project sinka-emulator --only firestore "cd backend && python -m pytest -q tests/test_lease_emulator.py"
