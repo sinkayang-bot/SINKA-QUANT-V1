@@ -32,3 +32,45 @@ def test_auth_rejects_missing_token():
         assert False, "Expected unauthorized"
     except HTTPException as exc:
         assert exc.status_code == 401
+
+def test_open_close_endpoints_without_real_exchange(tmp_path):
+    from fastapi.testclient import TestClient
+    mod.DB = str(tmp_path / "endpoint.db")
+
+    async def fake_price(symbol):
+        assert symbol == "BTC-USDT-SWAP"
+        return 100000.0
+
+    original = mod.price
+    mod.price = fake_price
+    try:
+        with TestClient(mod.app) as client:
+            headers = {"Authorization": "Bearer test-only-secret"}
+            assert client.get("/api/state").status_code == 401
+            initial = client.get("/api/state", headers=headers)
+            assert initial.status_code == 200
+            assert initial.json()["cash"] == 10000
+            bad = client.post("/api/open", headers=headers, json={"symbol":"BTC-USDT-SWAP","side":1,"stop":101000})
+            assert bad.status_code == 400
+            opened = client.post("/api/open", headers=headers, json={"symbol":"BTC-USDT-SWAP","side":1,"stop":99000})
+            assert opened.status_code == 200
+            assert client.post("/api/open", headers=headers, json={"symbol":"BTC-USDT-SWAP","side":1,"stop":99000}).status_code == 409
+            assert client.get("/api/state", headers=headers).json()["position"] is not None
+            closed = client.post("/api/close", headers=headers)
+            assert closed.status_code == 200
+            result = client.get("/api/state", headers=headers).json()
+            assert result["position"] is None
+            assert len(result["fills"]) == 1
+            assert result["cash"] < 10000  # spread/slippage and fees
+            assert client.post("/api/close", headers=headers).status_code == 404
+    finally:
+        mod.price = original
+
+
+def test_nonfinite_stop_rejected():
+    from pydantic import ValidationError
+    try:
+        mod.OpenRequest(symbol="BTC-USDT-SWAP", side=1, stop=float("nan"))
+        assert False, "Expected validation error"
+    except ValidationError:
+        pass
