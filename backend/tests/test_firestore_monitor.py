@@ -44,3 +44,10 @@ def test_short_stop(monkeypatch):
     monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=101500))
     assert asyncio.run(firestore_monitor.check_once(ledger)) == "closed"
     assert ledger.closed == [(101500, "short-position")]
+
+
+def test_long_stop_not_triggered(monkeypatch):
+    ledger = Ledger({"id": "long-position", "symbol": "BTC-USDT-SWAP", "side": 1, "stop": 99000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=100000))
+    assert asyncio.run(firestore_monitor.check_once(ledger)) == "watching"
+    assert ledger.closed == []
