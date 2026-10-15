@@ -56,6 +56,7 @@ def test_expired_lease_can_be_replaced():
     assert second.acquire()
     assert not first.is_owner()
     assert second.is_owner()
+    assert not first.acquire()
 
 def test_reused_open_request_rejected():
     from google.cloud import firestore
