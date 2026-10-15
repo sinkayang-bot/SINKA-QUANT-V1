@@ -74,9 +74,11 @@ def health():
     task = getattr(app.state, "monitor_task", None)
     monitor_enabled = os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true"
     monitor_running = bool(task is not None and not task.done())
+    monitor_error = bool(task is not None and task.done() and not task.cancelled() and task.exception() is not None)
     return {"status": "ok" if not monitor_enabled or monitor_running else "degraded",
             "mode": "paper_only", "storage": "firestore", "live_orders": False,
-            "monitor_enabled": monitor_enabled, "monitor_task_running": monitor_running}
+            "monitor_enabled": monitor_enabled, "monitor_task_running": monitor_running,
+            "monitor_task_failed": monitor_error}
 
 @app.get("/api/monitor-status")
 def monitor_status(owner: str = Depends(verify_owner_token)):
