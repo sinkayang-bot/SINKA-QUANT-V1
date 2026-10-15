@@ -35,9 +35,10 @@ class PaperLedger:
 
     @firestore.transactional
     def _open(self, transaction, symbol, side, entry, stop, key):
-        state = self._ensure(transaction)
         request_ref = self.account.collection("requests").document(key)
-        if request_ref.get(transaction=transaction).exists:
+        request_used = request_ref.get(transaction=transaction).exists
+        state = self._ensure(transaction)
+        if request_used:
             raise ValueError("Duplicate request ID")
         if state.get("position"):
             raise ValueError("A position is already open")
