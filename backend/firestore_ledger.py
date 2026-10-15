@@ -76,8 +76,14 @@ class PaperLedger:
         return self._open(self.db.transaction(), symbol, side, entry, stop, request_id)
 
     @firestore.transactional
-    def _close(self, transaction, observed_price, reason, expected_id):
+    def _close(self, transaction, observed_price, reason, expected_id, worker_id=None):
         snapshot = self.account.get(transaction=transaction)
+        if worker_id is not None:
+            lease_ref = self.account.collection("runtime").document("lease")
+            lease_snap = lease_ref.get(transaction=transaction)
+            lease = lease_snap.to_dict() if lease_snap.exists else {}
+            if lease.get("worker_id") != worker_id or float(lease.get("expires_at", 0)) <= time.time():
+                return None
         if not snapshot.exists:
             return None
         state = snapshot.to_dict()
@@ -99,10 +105,10 @@ class PaperLedger:
                                           "position": None, "version": state["version"] + 1})
         return fill
 
-    def close(self, observed_price, reason, expected_id):
+    def close(self, observed_price, reason, expected_id, worker_id=None):
         if not math.isfinite(observed_price) or observed_price <= 0:
             raise ValueError("Invalid price")
-        return self._close(self.db.transaction(), observed_price, reason, expected_id)
+        return self._close(self.db.transaction(), observed_price, reason, expected_id, worker_id)
 
     def snapshot(self):
         snap = self.account.get()
