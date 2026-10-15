@@ -29,6 +29,50 @@ function simulate(bars){
  }
  return {trades,equity,balance,maxDD,start};
 }
+
+const BT_STORAGE_KEY='sinka_quant_v17_last_backtest';
+function btPaintTrades(trades){
+ const body=bt('bt-rows');body.replaceChildren();
+ for(const t of trades.slice(-30).reverse()){
+  const row=document.createElement('tr');
+  for(const val of [new Date(t.time).toLocaleString('zh-TW'),t.side,Number(t.entry).toFixed(5),Number(t.exit).toFixed(5),Number(t.pnl).toFixed(2),t.reason]){
+   const td=document.createElement('td');td.textContent=val;row.appendChild(td);
+  }body.appendChild(row);
+ }
+}
+function btDisplay(data){
+ const {out,symbol,bar,first,last}=data;
+ const wins=out.trades.filter(t=>t.pnl>0),losses=out.trades.filter(t=>t.pnl<0);
+ const gp=wins.reduce((n,t)=>n+t.pnl,0),gl=-losses.reduce((n,t)=>n+t.pnl,0),pnl=out.balance-out.start;
+ const put=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+ put('ov-pnl',(pnl>=0?'+':'')+pnl.toFixed(2));
+ put('ov-return',((out.balance/out.start-1)*100).toFixed(2)+'%');
+ put('ov-win',out.trades.length?(wins.length/out.trades.length*100).toFixed(1)+'%':'—');
+ put('ov-trades',String(out.trades.length));put('ov-pf',gl>0?(gp/gl).toFixed(2):'—');put('ov-dd',(out.maxDD*100).toFixed(2)+'%');
+ put('bt-trades',String(out.trades.length));
+ put('bt-win',out.trades.length?(wins.length/out.trades.length*100).toFixed(1)+'%':'—');
+ put('bt-return',((out.balance/out.start-1)*100).toFixed(2)+'%');
+ put('bt-dd',(out.maxDD*100).toFixed(2)+'%');put('bt-pf',gl>0?(gp/gl).toFixed(2):'—');
+ const info=symbol+' / '+bar+' · '+new Date(first).toLocaleString('zh-TW')+' ～ '+new Date(last).toLocaleString('zh-TW')+' · 初始資金 '+out.start+' USDT';
+ put('ov-info','最近一次歷史回測（本機儲存）：'+info);
+ put('bt-state','回測結果：'+info);
+ const el=bt('ov-pnl');if(el)el.className='value '+(pnl>=0?'up':'down');
+ btPaintTrades(out.trades);
+}
+function btRestore(){
+ try{const raw=localStorage.getItem(BT_STORAGE_KEY);if(!raw)return;const data=JSON.parse(raw);
+  if(data?.version!==1||!Array.isArray(data.out?.trades)||!Number.isFinite(data.out?.balance))return;
+  BT.trades=data.out.trades;BT.equity=data.out.equity||[];btDisplay(data);
+ }catch(e){console.warn('Cannot restore saved backtest',e);}
+}
+function btExport(){
+ if(!BT.trades.length){alert('請先執行有交易結果的回測');return;}
+ const rows=[['時間','方向','進場','出場','淨損益USDT','出場原因','結算權益'],...BT.trades.map(t=>[new Date(t.time).toISOString(),t.side,t.entry,t.exit,t.pnl,t.reason,t.balance])];
+ const csv='\uFEFF'+rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+ const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+ const a=document.createElement('a');a.href=url;a.download='sinka-quant-backtest.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+
 async function backtest(){
  if(BT.busy)return;BT.busy=true;bt('bt-state').textContent='回測中…';
  try{
@@ -47,28 +91,11 @@ async function backtest(){
  }
  const bars=[...all.values()].sort((a,b)=>a.ts-b.ts);if(bars.length<50)throw Error('已收盤 K 棒不足');
  const out=simulate(bars);BT.bars=bars;BT.trades=out.trades;BT.equity=out.equity;
- const pnl=out.balance-out.start;
- const setOv=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
- const winners=out.trades.filter(t=>t.pnl>0),losers=out.trades.filter(t=>t.pnl<0);
- const gp=winners.reduce((n,t)=>n+t.pnl,0),gl=-losers.reduce((n,t)=>n+t.pnl,0);
- setOv('ov-pnl',(pnl>=0?'+':'')+pnl.toFixed(2));
- setOv('ov-return',((out.balance/out.start-1)*100).toFixed(2)+'%');
- setOv('ov-win',out.trades.length?(winners.length/out.trades.length*100).toFixed(1)+'%':'—');
- setOv('ov-trades',String(out.trades.length));
- setOv('ov-pf',gl>0?(gp/gl).toFixed(2):'—');
- setOv('ov-dd',(out.maxDD*100).toFixed(2)+'%');
- const info=document.getElementById('ov-info');if(info)info.textContent='最近回測：'+symbol+' / '+bar+' · '+new Date(bars[0].ts).toLocaleDateString('zh-TW')+' ～ '+new Date(bars[bars.length-1].ts).toLocaleDateString('zh-TW')+' · 初始模擬資金 10,000 USDT · 僅供研究';
- const pnlEl=document.getElementById('ov-pnl');if(pnlEl)pnlEl.className='value '+(pnl>=0?'up':'down');
- const wins=out.trades.filter(t=>t.pnl>0),losses=out.trades.filter(t=>t.pnl<0);
- const grossProfit=wins.reduce((s,t)=>s+t.pnl,0),grossLoss=-losses.reduce((s,t)=>s+t.pnl,0);
- bt('bt-trades').textContent=String(out.trades.length);
- bt('bt-win').textContent=out.trades.length?(wins.length/out.trades.length*100).toFixed(1)+'%':'—';
- bt('bt-return').textContent=((out.balance/out.start-1)*100).toFixed(2)+'%';
- bt('bt-dd').textContent=(out.maxDD*100).toFixed(2)+'%';
- bt('bt-pf').textContent=grossLoss>0?(grossProfit/grossLoss).toFixed(2):'—';
- bt('bt-state').textContent='回測完成：'+bars.length+' 根已收盤 K 棒 · '+new Date(bars[0].ts).toLocaleString('zh-TW')+' ～ '+new Date(bars[bars.length-1].ts).toLocaleString('zh-TW');
- const body=bt('bt-rows');body.replaceChildren();
- for(const t of out.trades.slice(-30).reverse()){const row=document.createElement('tr');for(const val of [new Date(t.time).toLocaleString('zh-TW'),t.side,t.entry.toFixed(5),t.exit.toFixed(5),t.pnl.toFixed(2),t.reason]){const td=document.createElement('td');td.textContent=val;row.appendChild(td);}body.appendChild(row);}
+ const snapshot={version:1,symbol,bar,first:bars[0].ts,last:bars[bars.length-1].ts,out:{start:out.start,balance:out.balance,maxDD:out.maxDD,trades:out.trades,equity:out.equity}};
+ btDisplay(snapshot);
+ try{localStorage.setItem(BT_STORAGE_KEY,JSON.stringify(snapshot));}catch(e){bt('bt-state').textContent+='（本機儲存失敗）';}
  }catch(e){bt('bt-state').textContent='回測失敗：'+String(e.message||e);}finally{BT.busy=false;}
 }
 bt('bt-run').addEventListener('click',backtest);
+bt('bt-export').addEventListener('click',btExport);
+btRestore();
