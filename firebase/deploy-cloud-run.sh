@@ -13,8 +13,13 @@ fi
 : "${GOOGLE_CLOUD_REGION:=asia-east1}"
 : "${SINKA_SERVICE:=sinka-paper-engine}"
 
+build_dir="$(mktemp -d)"
+trap 'rm -rf "$build_dir"' EXIT
+cp backend/requirements.txt backend/*.py "$build_dir/"
+cp backend/Dockerfile.firestore "$build_dir/Dockerfile"
+
 gcloud run deploy "$SINKA_SERVICE" \
-  --source backend \
+  --source "$build_dir" \
   --project "$GOOGLE_CLOUD_PROJECT" \
   --region "$GOOGLE_CLOUD_REGION" \
   --no-allow-unauthenticated \
