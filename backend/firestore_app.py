@@ -4,8 +4,10 @@ Run with: uvicorn firestore_app:app --host 0.0.0.0 --port 8000
 Not deployed; use Firebase ID tokens from an authenticated owner.
 """
 import math
+import asyncio
+import os
+from contextlib import asynccontextmanager
 import time
-import uuid
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -16,7 +18,23 @@ from typing import Literal
 from firebase_auth import verify_owner_token
 from firestore_ledger import PaperLedger
 
-app = FastAPI(title="SINKA QUANT Firestore Paper API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = None
+    if os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true":
+        from firestore_monitor import run_monitor
+        task = asyncio.create_task(run_monitor(), name="sinka-paper-monitor")
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+app = FastAPI(title="SINKA QUANT Firestore Paper API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://sinkayang-bot.github.io"],
