@@ -27,3 +27,29 @@ jobs:
       - run: python -m compileall -q app.py firebase_auth.py firestore_ledger.py firestore_app.py firestore_monitor.py monitor_lease.py
       - run: python -m py_compile leased_monitor.py
       - run: pytest -q tests
+
+  firestore-emulator:
+    runs-on: ubuntu-latest
+    services:
+      firestore:
+        image: google/cloud-sdk:emulators
+        ports:
+          - 8085:8085
+        options: >-
+          --health-cmd "bash -c 'echo > /dev/tcp/127.0.0.1/8085'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FIRESTORE_EMULATOR_HOST: localhost:8085
+      GOOGLE_CLOUD_PROJECT: sinka-emulator
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests/test_lease_emulator.py
