@@ -1,0 +1,13 @@
+services:
+  paper:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PAPER_API_TOKEN=${PAPER_API_TOKEN:?Set a long random token}
+      - DB_PATH=/data/paper.db
+    volumes:
+      - paper_data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+volumes:
+  paper_data:
