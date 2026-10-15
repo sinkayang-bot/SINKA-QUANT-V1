@@ -25,7 +25,8 @@ async def run():
                     await asyncio.sleep(INTERVAL)
                     continue
                 status = await check_once(ledger)
-                await asyncio.to_thread(write_heartbeat, ledger, status)
+                if await asyncio.to_thread(lease.is_owner):
+                    await asyncio.to_thread(write_heartbeat, ledger, status)
                 delay = INTERVAL
             except asyncio.CancelledError:
                 raise
