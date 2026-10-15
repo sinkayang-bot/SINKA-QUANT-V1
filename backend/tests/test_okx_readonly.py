@@ -17,9 +17,14 @@ def test_live_mode_does_not_claim_demo():
     assert "x-simulated-trading" not in obj._headers("/api/v5/account/balance")
 
 def test_trade_endpoint_is_rejected_before_network():
-    with pytest.raises(ValueError, match="not permitted"):
+    with pytest.raises(ValueError, match="Order lookup requires"):
         asyncio.run(client().get("/api/v5/trade/order"))
 
 def test_only_swap_positions_allowed():
     with pytest.raises(ValueError, match="swap positions"):
         asyncio.run(client().get("/api/v5/account/positions", {"instType": "SPOT"}))
+
+
+def test_trade_submission_remains_blocked():
+    with pytest.raises(ValueError, match="not permitted"):
+        asyncio.run(client().get("/api/v5/trade/cancel-order"))
