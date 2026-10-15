@@ -40,3 +40,20 @@ def test_paper_close_is_idempotent():
     assert ledger.close(98900, "paper stop", position["id"], first.worker_id) is not None
     assert ledger.close(98900, "paper stop", position["id"], first.worker_id) is None
     assert ledger.snapshot()["position"] is None
+
+def test_expired_lease_can_be_replaced(monkeypatch):
+    import monitor_lease
+    from google.cloud import firestore
+    from firestore_ledger import PaperLedger
+    from monitor_lease import MonitorLease
+
+    db = firestore.Client(project="sinka-emulator")
+    ledger = PaperLedger(db=db, account_id="test-" + uuid.uuid4().hex)
+    first = MonitorLease(ledger, worker_id="worker-a")
+    second = MonitorLease(ledger, worker_id="worker-b")
+    monkeypatch.setattr(monitor_lease.time, "time", lambda: 1000.0)
+    assert first.acquire()
+    monkeypatch.setattr(monitor_lease.time, "time", lambda: 1031.0)
+    assert second.acquire()
+    assert not first.is_owner()
+    assert second.is_owner()
