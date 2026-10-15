@@ -47,6 +47,18 @@ async function backtest(){
  }
  const bars=[...all.values()].sort((a,b)=>a.ts-b.ts);if(bars.length<50)throw Error('已收盤 K 棒不足');
  const out=simulate(bars);BT.bars=bars;BT.trades=out.trades;BT.equity=out.equity;
+ const pnl=out.balance-out.start;
+ const setOv=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
+ const winners=out.trades.filter(t=>t.pnl>0),losers=out.trades.filter(t=>t.pnl<0);
+ const gp=winners.reduce((n,t)=>n+t.pnl,0),gl=-losers.reduce((n,t)=>n+t.pnl,0);
+ setOv('ov-pnl',(pnl>=0?'+':'')+pnl.toFixed(2));
+ setOv('ov-return',((out.balance/out.start-1)*100).toFixed(2)+'%');
+ setOv('ov-win',out.trades.length?(winners.length/out.trades.length*100).toFixed(1)+'%':'—');
+ setOv('ov-trades',String(out.trades.length));
+ setOv('ov-pf',gl>0?(gp/gl).toFixed(2):'—');
+ setOv('ov-dd',(out.maxDD*100).toFixed(2)+'%');
+ const info=document.getElementById('ov-info');if(info)info.textContent='最近回測：'+symbol+' / '+bar+' · '+new Date(bars[0].ts).toLocaleDateString('zh-TW')+' ～ '+new Date(bars[bars.length-1].ts).toLocaleDateString('zh-TW')+' · 初始模擬資金 10,000 USDT · 僅供研究';
+ const pnlEl=document.getElementById('ov-pnl');if(pnlEl)pnlEl.className='value '+(pnl>=0?'up':'down');
  const wins=out.trades.filter(t=>t.pnl>0),losses=out.trades.filter(t=>t.pnl<0);
  const grossProfit=wins.reduce((s,t)=>s+t.pnl,0),grossLoss=-losses.reduce((s,t)=>s+t.pnl,0);
  bt('bt-trades').textContent=String(out.trades.length);
