@@ -65,3 +65,15 @@ def test_lease_owner_is_forwarded_to_close(monkeypatch):
     assert asyncio.run(firestore_monitor.check_once(ledger, lease=Lease())) == "closed"
     assert ledger.closed == [(98000, "leased-position")]
     assert ledger.close_workers == ["lease-owner"]
+
+
+def test_long_stop_exact_boundary(monkeypatch):
+    ledger = Ledger({"id": "boundary-long", "symbol": "BTC-USDT-SWAP", "side": 1, "stop": 99000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=99000))
+    assert asyncio.run(firestore_monitor.check_once(ledger)) == "closed"
+
+
+def test_short_stop_exact_boundary(monkeypatch):
+    ledger = Ledger({"id": "boundary-short", "symbol": "BTC-USDT-SWAP", "side": -1, "stop": 101000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=101000))
+    assert asyncio.run(firestore_monitor.check_once(ledger)) == "closed"
