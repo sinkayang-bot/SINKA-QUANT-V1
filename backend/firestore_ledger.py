@@ -19,7 +19,6 @@ class PaperLedger:
         self.db = db or firestore.Client()
         self.account = self.db.collection("paper_accounts").document(account_id)
 
-    @firestore.transactional
     def _ensure(self, transaction):
         snapshot = self.account.get(transaction=transaction)
         if not snapshot.exists:
@@ -37,6 +36,9 @@ class PaperLedger:
     @firestore.transactional
     def _open(self, transaction, symbol, side, entry, stop, key):
         state = self._ensure(transaction)
+        request_ref = self.account.collection("requests").document(key)
+        if request_ref.get(transaction=transaction).exists:
+            raise ValueError("Duplicate request ID")
         if state.get("position"):
             raise ValueError("A position is already open")
         cash = float(state["cash"])
@@ -49,6 +51,7 @@ class PaperLedger:
             raise ValueError("Insufficient paper balance")
         position = {"symbol": symbol, "side": side, "entry": entry, "stop": stop,
                     "qty": qty, "opened_at": int(time.time()), "id": key}
+        transaction.create(request_ref, {"created_at": firestore.SERVER_TIMESTAMP, "type": "open"})
         transaction.update(self.account, {"cash": cash - fee, "position": position,
                                           "version": state["version"] + 1})
         return position
