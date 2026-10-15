@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py firestore_app.py firestore_ledger.py firebase_auth.py firestore_monitor.py ./
+COPY app.py firestore_app.py firestore_ledger.py firebase_auth.py firestore_monitor.py monitor_lease.py ./
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 EXPOSE 8000
