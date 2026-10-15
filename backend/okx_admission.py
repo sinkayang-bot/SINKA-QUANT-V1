@@ -5,6 +5,7 @@ Pure checks only. No API credentials, network access, or order submission.
 from dataclasses import dataclass
 from okx_reconcile import reconcile_positions
 from okx_instruments import validate_with_instrument
+from okx_sync_gate import assess_sync
 
 @dataclass(frozen=True)
 class Admission:
@@ -15,9 +16,13 @@ class Admission:
 def evaluate(*, local_position, exchange_positions, instrument,
              side, contracts, price, stop, equity_usdt, leverage,
              monitor_healthy, orders_synced, kill_switch,
-             demo_verified, live_requested=False):
+             demo_verified, live_requested=False, sync_status=None,
+             current_session_verified=False):
     if live_requested:
         return Admission(False, "live_trading_locked")
+    freshness = assess_sync(sync_status, current_session_verified=current_session_verified)
+    if not freshness.ready:
+        return Admission(False, freshness.reason)
     if kill_switch:
         return Admission(False, "kill_switch_active")
     if not monitor_healthy:
