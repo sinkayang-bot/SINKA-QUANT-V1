@@ -22,6 +22,7 @@ from firestore_ledger import PaperLedger
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = None
+    app.state.monitor_task = None
     if os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true":
         if not os.environ.get("SINKA_OWNER_UID", "").strip():
             raise RuntimeError("SINKA_OWNER_UID must be configured")
