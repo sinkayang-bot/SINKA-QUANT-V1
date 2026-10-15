@@ -27,11 +27,18 @@ async def run():
                 status = await check_once(ledger, lease=lease)
                 if await asyncio.to_thread(lease.is_owner):
                     await asyncio.to_thread(write_heartbeat, ledger, status)
+                else:
+                    log.warning("monitor lease lost; skipping heartbeat")
                 delay = INTERVAL
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("paper monitor iteration failed")
+                try:
+                    if await asyncio.to_thread(lease.is_owner):
+                        await asyncio.to_thread(write_heartbeat, ledger, "error")
+                except Exception:
+                    log.exception("unable to record monitor error heartbeat")
                 delay = min(60.0, max(INTERVAL, delay * 2))
             await asyncio.sleep(delay)
     finally:
