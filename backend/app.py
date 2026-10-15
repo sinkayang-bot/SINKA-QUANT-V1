@@ -137,9 +137,42 @@ async def state():
             unrealized = pos["qty"] * pos["side"] * (current_price - pos["entry"]) - pos["qty"] * current_price * FEE
         except Exception:
             pass
-    return {"cash": cash, "equity": cash + unrealized if unrealized is not None else None,
+    return {"cash": cash, "equity": cash + unrealized if unrealized is not None else (cash if not pos else None),
             "unrealized": unrealized, "current_price": current_price,
             "position": dict(pos) if pos else None, "fills": [dict(x) for x in fills]}
+
+
+@app.get("/api/performance", dependencies=[Depends(auth)])
+async def performance():
+    """Realized paper metrics only; independent of browser historical backtests."""
+    with connect() as db:
+        cash = db.execute("SELECT cash FROM account WHERE id=1").fetchone()["cash"]
+        fills = db.execute("SELECT pnl FROM fills ORDER BY id").fetchall()
+        position = db.execute("SELECT 1 FROM positions LIMIT 1").fetchone()
+    pnls = [float(row["pnl"]) for row in fills]
+    wins = [x for x in pnls if x > 0]
+    losses = [x for x in pnls if x < 0]
+    gross_profit = sum(wins)
+    gross_loss = -sum(losses)
+    equity = INITIAL
+    peak = INITIAL
+    max_dd = 0.0
+    for result in pnls:
+        equity += result
+        peak = max(peak, equity)
+        max_dd = max(max_dd, (peak - equity) / peak) if peak > 0 else max_dd
+    return {
+        "mode": "paper_only",
+        "initial_balance": INITIAL,
+        "cash": cash,
+        "realized_pnl": cash - INITIAL,
+        "closed_trades": len(pnls),
+        "win_rate_pct": 100 * len(wins) / len(pnls) if pnls else None,
+        "profit_factor": gross_profit / gross_loss if gross_loss > 0 else None,
+        "max_closed_equity_drawdown_pct": 100 * max_dd,
+        "has_open_position": bool(position),
+        "note": "Closed-trade metrics only; drawdown excludes intratrade equity and open positions.",
+    }
 
 
 @app.post("/api/open", dependencies=[Depends(auth)])
