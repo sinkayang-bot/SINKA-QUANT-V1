@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("SINKA_OWNER_UID must be configured")
         from leased_monitor import run as run_monitor
         task = asyncio.create_task(run_monitor(), name="sinka-paper-monitor")
+        app.state.monitor_task = task
     try:
         yield
     finally:
@@ -69,7 +70,12 @@ async def quote(symbol: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "mode": "paper_only", "storage": "firestore", "live_orders": False}
+    task = getattr(app.state, "monitor_task", None)
+    monitor_enabled = os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true"
+    monitor_running = bool(task is not None and not task.done())
+    return {"status": "ok" if not monitor_enabled or monitor_running else "degraded",
+            "mode": "paper_only", "storage": "firestore", "live_orders": False,
+            "monitor_enabled": monitor_enabled, "monitor_task_running": monitor_running}
 
 @app.get("/api/monitor-status")
 def monitor_status(owner: str = Depends(verify_owner_token)):
