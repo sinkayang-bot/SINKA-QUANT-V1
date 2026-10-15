@@ -9,3 +9,5 @@ EXPOSE 8000
 # Default stays on the legacy SQLite app for local Docker Compose compatibility.
 # Cloud Run migration will explicitly use firestore_app and a coordinated monitor.
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
+COPY leased_monitor.py ./
