@@ -23,6 +23,8 @@ from firestore_ledger import PaperLedger
 async def lifespan(app: FastAPI):
     task = None
     if os.getenv("SINKA_ENABLE_MONITOR", "false").lower() == "true":
+        if not os.environ.get("SINKA_OWNER_UID", "").strip():
+            raise RuntimeError("SINKA_OWNER_UID must be configured")
         from leased_monitor import run as run_monitor
         task = asyncio.create_task(run_monitor(), name="sinka-paper-monitor")
     try:
