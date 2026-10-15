@@ -31,3 +31,18 @@ Use a persistent Firestore-backed state machine, idempotent execution, and a lea
 - Market data may disconnect or become stale. Never fill a paper stop at the requested stop price if the next observed price has already gapped past it.
 - Even with always-allocated CPU, Cloud Run may restart; maintain an external heartbeat and alerts.
 - Don't place OKX API keys or Google service-account JSON in GitHub, client-side code, or public URLs.
+
+## Firebase token and Cloud Run IAM boundary
+
+Firebase Authentication ID tokens are **not** Google-signed Cloud Run IAM invocation
+identity tokens. The current deploy command uses `--no-allow-unauthenticated`,
+which blocks direct browser requests carrying only Firebase ID tokens before they
+reach FastAPI. Do not work around this by putting service account credentials in
+the browser or by treating the Firebase token as an IAM token.
+
+Before deployment, select and test a compatible ingress design (for example, an
+appropriately protected HTTPS gateway that verifies Firebase tokens and forwards
+to private Cloud Run). A public-invoker design requires a separate documented
+security review, explicit owner approval, abuse controls, and verified API
+authorization on **every** sensitive route. The deployment marker must stay absent
+until the chosen design is tested end-to-end.
