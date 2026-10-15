@@ -50,6 +50,10 @@ def test_open_close_endpoints_without_real_exchange(tmp_path):
             initial = client.get("/api/state", headers=headers)
             assert initial.status_code == 200
             assert initial.json()["cash"] == 10000
+            assert initial.json()["equity"] == 10000
+            assert client.get("/api/performance").status_code == 401
+            before = client.get("/api/performance", headers=headers).json()
+            assert before["closed_trades"] == 0 and before["win_rate_pct"] is None
             bad = client.post("/api/open", headers=headers, json={"symbol":"BTC-USDT-SWAP","side":1,"stop":101000})
             assert bad.status_code == 400
             opened = client.post("/api/open", headers=headers, json={"symbol":"BTC-USDT-SWAP","side":1,"stop":99000})
@@ -61,6 +65,10 @@ def test_open_close_endpoints_without_real_exchange(tmp_path):
             result = client.get("/api/state", headers=headers).json()
             assert result["position"] is None
             assert len(result["fills"]) == 1
+            performance = client.get("/api/performance", headers=headers).json()
+            assert performance["closed_trades"] == 1
+            assert performance["win_rate_pct"] == 0
+            assert performance["realized_pnl"] < 0
             assert result["cash"] < 10000  # spread/slippage and fees
             assert client.post("/api/close", headers=headers).status_code == 404
     finally:
