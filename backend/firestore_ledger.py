@@ -29,9 +29,12 @@ class PaperLedger:
             return {"cash": INITIAL, "position": None, "version": 0}
         return snapshot.to_dict()
 
-    def initialize(self):
-        transaction = self.db.transaction()
+    @firestore.transactional
+    def _initialize(self, transaction):
         return self._ensure(transaction)
+
+    def initialize(self):
+        return self._initialize(self.db.transaction())
 
     @firestore.transactional
     def _open(self, transaction, symbol, side, entry, stop, key):
