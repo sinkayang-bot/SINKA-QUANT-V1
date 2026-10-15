@@ -40,7 +40,10 @@ class PaperLedger:
     def _open(self, transaction, symbol, side, entry, stop, key):
         request_ref = self.account.collection("requests").document(key)
         request_used = request_ref.get(transaction=transaction).exists
-        state = self._ensure(transaction)
+        account_snapshot = self.account.get(transaction=transaction)
+        if not account_snapshot.exists:
+            raise ValueError("Paper account not initialized")
+        state = account_snapshot.to_dict()
         if request_used:
             raise ValueError("Duplicate request ID")
         if state.get("position"):
