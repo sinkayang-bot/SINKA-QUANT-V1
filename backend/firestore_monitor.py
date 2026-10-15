@@ -30,7 +30,10 @@ async def check_once(ledger, lease=None):
         return "watching"
     if lease is not None and not await asyncio.to_thread(lease.is_owner):
         return "lease_lost"
-    fill = await asyncio.to_thread(ledger.close, px, "stop (background)", position["id"])
+    if lease is None:
+        fill = await asyncio.to_thread(ledger.close, px, "stop (background)", position["id"])
+    else:
+        fill = await asyncio.to_thread(ledger.close, px, "stop (background)", position["id"], lease.worker_id)
     return "closed" if fill else "already_closed"
 
 
