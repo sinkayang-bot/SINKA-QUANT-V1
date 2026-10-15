@@ -24,7 +24,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt pytest
-      - run: python -m compileall -q app.py firebase_auth.py firestore_ledger.py firestore_app.py firestore_monitor.py monitor_lease.py
+      - run: python -m compileall -q app.py firebase_auth.py firestore_ledger.py firestore_app.py firestore_monitor.py monitor_lease.py okx_readonly.py
       - run: python -m py_compile leased_monitor.py
       - run: pytest -q tests
 
