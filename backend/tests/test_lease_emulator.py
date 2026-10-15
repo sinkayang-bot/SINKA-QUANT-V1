@@ -41,8 +41,7 @@ def test_paper_close_is_idempotent():
     assert ledger.close(98900, "paper stop", position["id"], first.worker_id) is None
     assert ledger.snapshot()["position"] is None
 
-def test_expired_lease_can_be_replaced(monkeypatch):
-    import monitor_lease
+def test_expired_lease_can_be_replaced():
     from google.cloud import firestore
     from firestore_ledger import PaperLedger
     from monitor_lease import MonitorLease
@@ -57,3 +56,14 @@ def test_expired_lease_can_be_replaced(monkeypatch):
     assert second.acquire()
     assert not first.is_owner()
     assert second.is_owner()
+
+def test_reused_open_request_rejected():
+    from google.cloud import firestore
+    from firestore_ledger import PaperLedger
+
+    db = firestore.Client(project="sinka-emulator")
+    ledger = PaperLedger(db=db, account_id="test-" + uuid.uuid4().hex)
+    ledger.initialize()
+    ledger.open("BTC-USDT-SWAP", 1, 100000, 99000, "request-replay-123")
+    with pytest.raises(ValueError, match="Duplicate request ID"):
+        ledger.open("BTC-USDT-SWAP", 1, 100000, 99000, "request-replay-123")
