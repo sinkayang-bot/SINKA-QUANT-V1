@@ -37,3 +37,10 @@ def test_lease_lost_prevents_close(monkeypatch):
             return False
     assert asyncio.run(firestore_monitor.check_once(ledger, lease=LostLease())) == "lease_lost"
     assert ledger.closed == []
+
+
+def test_short_stop(monkeypatch):
+    ledger = Ledger({"id": "short-position", "symbol": "ETH-USDT-SWAP", "side": -1, "stop": 101000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=101500))
+    assert asyncio.run(firestore_monitor.check_once(ledger)) == "closed"
+    assert ledger.closed == [(101500, "short-position")]
