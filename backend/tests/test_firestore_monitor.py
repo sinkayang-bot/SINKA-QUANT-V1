@@ -9,7 +9,7 @@ class Ledger:
         self.closed = []
     def snapshot(self):
         return {"position": self.position}
-    def close(self, price, reason, position_id):
+    def close(self, price, reason, position_id, worker_id=None):
         self.closed.append((price, position_id))
         return {"position_id": position_id}
 
@@ -26,4 +26,14 @@ def test_short_not_triggered(monkeypatch):
     ledger = Ledger({"id": "test-position", "symbol": "BTC-USDT-SWAP", "side": -1, "stop": 101000})
     monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=100000))
     assert asyncio.run(firestore_monitor.check_once(ledger)) == "watching"
+    assert ledger.closed == []
+
+def test_lease_lost_prevents_close(monkeypatch):
+    ledger = Ledger({"id": "test-position", "symbol": "BTC-USDT-SWAP", "side": 1, "stop": 99000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=98900))
+    class LostLease:
+        worker_id = "worker-test"
+        def is_owner(self):
+            return False
+    assert asyncio.run(firestore_monitor.check_once(ledger, lease=LostLease())) == "lease_lost"
     assert ledger.closed == []
