@@ -12,6 +12,7 @@ ALLOWED_PATHS = frozenset({
     "/api/v5/account/balance",
     "/api/v5/account/positions",
     "/api/v5/account/config",
+    "/api/v5/trade/order",
     "/api/v5/public/instruments",
 })
 ALLOWED_SYMBOLS = frozenset({
@@ -48,6 +49,9 @@ class OKXReadOnly:
         if path not in ALLOWED_PATHS:
             raise ValueError("Endpoint not permitted in read-only adapter")
         params = params or {}
+        if path == "/api/v5/trade/order":
+            if params.get("instId") not in ALLOWED_SYMBOLS or bool(params.get("ordId")) == bool(params.get("clOrdId")):
+                raise ValueError("Order lookup requires allowlisted instrument and exactly one identifier")
         if path == "/api/v5/account/positions":
             inst_type = params.get("instType")
             if inst_type != "SWAP":
