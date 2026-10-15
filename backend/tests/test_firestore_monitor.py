@@ -7,10 +7,12 @@ class Ledger:
     def __init__(self, position):
         self.position = position
         self.closed = []
+        self.close_workers = []
     def snapshot(self):
         return {"position": self.position}
     def close(self, price, reason, position_id, worker_id=None):
         self.closed.append((price, position_id))
+        self.close_workers.append(worker_id)
         return {"position_id": position_id}
 
 def test_idle():
@@ -62,3 +64,4 @@ def test_lease_owner_is_forwarded_to_close(monkeypatch):
             return True
     assert asyncio.run(firestore_monitor.check_once(ledger, lease=Lease())) == "closed"
     assert ledger.closed == [(98000, "leased-position")]
+    assert ledger.close_workers == ["lease-owner"]
