@@ -15,6 +15,8 @@ function summary(){
  const wins=state.closed.filter(x=>x.pnl>0).length;
  const values={'paper-equity':fmt(equity),'paper-cash':fmt(state.cash),'paper-unreal':p?(price?fmt(unreal):'行情過期'):'0.00','paper-win':state.closed.length?(100*wins/state.closed.length).toFixed(1)+'%':'—','paper-count':String(state.closed.length),'paper-pnl':fmt(state.cash-START)};
  Object.entries(values).forEach(([id,v])=>{const e=$(id);if(e)e.textContent=v;});
+ const ovValues={'ov-paper-equity':fmt(equity),'ov-paper-pnl':fmt(state.cash-START),'ov-paper-win':state.closed.length?(100*wins/state.closed.length).toFixed(1)+'%':'—'};
+ Object.entries(ovValues).forEach(([id,v])=>{const e=$(id);if(e)e.textContent=v;});
  $('paper-position').textContent=p?(p.symbol+' · '+(p.side===1?'做多':'做空')+' · '+fmt(p.qty)+' 單位 · 進場 '+fmt(p.entry)+' · 停損 '+fmt(p.stop)):'目前無模擬持倉';
  $('paper-close').disabled=!p||!price;
  $('paper-open').disabled=!!p;
