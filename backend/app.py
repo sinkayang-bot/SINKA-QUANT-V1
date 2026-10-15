@@ -1,6 +1,7 @@
 """SINKA QUANT paper-only server. No private OKX endpoints or real order execution."""
 import asyncio
 import hmac
+import math
 import os
 import sqlite3
 import time
@@ -53,7 +54,7 @@ async def price(symbol: str) -> float:
     item = data["data"][0]
     px = float(item["last"])
     ts = int(item["ts"])
-    if px <= 0 or abs(time.time() * 1000 - ts) > 20000:
+    if not math.isfinite(px) or px <= 0 or abs(time.time() * 1000 - ts) > 20000:
         raise HTTPException(503, "Stale or invalid market price")
     return px
 
@@ -66,7 +67,7 @@ async def auth(authorization: str | None = Header(default=None)):
 class OpenRequest(BaseModel):
     symbol: Literal["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "XRP-USDT-SWAP", "DOGE-USDT-SWAP"]
     side: Literal[-1, 1]
-    stop: float = Field(gt=0)
+    stop: float = Field(gt=0, allow_inf_nan=False)
 
 
 def close_position(db, pos, px: float, reason: str):
@@ -147,7 +148,7 @@ async def open_paper(req: OpenRequest):
         px = await price(req.symbol)
         entry = px * (1 + req.side * SLIP)
         dist = req.side * (entry - req.stop)
-        if dist <= 0:
+        if not math.isfinite(dist) or dist <= 0:
             raise HTTPException(400, "Stop must be on the loss side")
         with connect() as db:
             db.execute("BEGIN IMMEDIATE")
