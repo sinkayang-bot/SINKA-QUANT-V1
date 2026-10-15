@@ -18,7 +18,7 @@ INTERVAL = max(2.0, float(os.getenv("SINKA_MONITOR_SECONDS", "5")))
 OWNER = os.getenv("SINKA_OWNER_UID", "").strip()
 
 
-async def check_once(ledger):
+async def check_once(ledger, lease=None):
     snapshot = await asyncio.to_thread(ledger.snapshot)
     position = (snapshot or {}).get("position")
     if not position:
@@ -28,6 +28,8 @@ async def check_once(ledger):
         position["side"] == -1 and px >= position["stop"])
     if not triggered:
         return "watching"
+    if lease is not None and not await asyncio.to_thread(lease.is_owner):
+        return "lease_lost"
     fill = await asyncio.to_thread(ledger.close, px, "stop (background)", position["id"])
     return "closed" if fill else "already_closed"
 
