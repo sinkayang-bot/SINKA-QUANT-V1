@@ -41,3 +41,10 @@ class MonitorLease:
 
     def release(self):
         self._release(self.db.transaction())
+
+    def is_owner(self):
+        snapshot = self.ref.get()
+        if not snapshot.exists:
+            return False
+        data = snapshot.to_dict()
+        return data.get("worker_id") == self.worker_id and float(data.get("expires_at", 0)) > time.time()
