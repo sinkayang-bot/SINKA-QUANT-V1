@@ -7,6 +7,7 @@ import math
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import time
 
 import httpx
@@ -67,6 +68,19 @@ async def quote(symbol: str):
 @app.get("/health")
 def health():
     return {"status": "ok", "mode": "paper_only", "storage": "firestore", "live_orders": False}
+
+@app.get("/api/monitor-status")
+def monitor_status(owner: str = Depends(verify_owner_token)):
+    ledger = PaperLedger(account_id=owner)
+    record = ledger.account.collection("runtime").document("monitor").get()
+    if not record.exists:
+        return {"status": "never_reported", "healthy": False}
+    data = record.to_dict()
+    checked = data.get("last_check_at")
+    age = (datetime.now(timezone.utc) - checked).total_seconds() if checked else None
+    return {"status": data.get("status", "unknown"),
+            "healthy": bool(age is not None and 0 <= age <= 30 and data.get("status") != "error"),
+            "seconds_since_check": round(age, 1) if age is not None else None}
 
 @app.post("/api/initialize")
 def initialize(owner: str = Depends(verify_owner_token)):
