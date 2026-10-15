@@ -46,3 +46,17 @@ to private Cloud Run). A public-invoker design requires a separate documented
 security review, explicit owner approval, abuse controls, and verified API
 authorization on **every** sensitive route. The deployment marker must stay absent
 until the chosen design is tested end-to-end.
+
+## Health checks and alerts
+
+The public `/health` endpoint reports local task liveness and a
+`monitor_task_failed` flag. It does **not** prove that Firestore is reachable,
+that the lease is held, or that recent market data has been processed.
+The owner-protected `/api/monitor-status` endpoint reports the persisted
+Firestore heartbeat. Both signals are needed to distinguish an alive HTTP
+process from an active monitor.
+
+Before enabling production-like paper monitoring, configure an external
+scheduled checker with alert delivery and verify a simulated monitor failure
+causes a notification. A single Cloud Run instance cannot reliably alert
+about its own process being terminated. No alert destination is configured yet.
