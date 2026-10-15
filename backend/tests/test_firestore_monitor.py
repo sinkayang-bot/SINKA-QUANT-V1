@@ -51,3 +51,14 @@ def test_long_stop_not_triggered(monkeypatch):
     monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=100000))
     assert asyncio.run(firestore_monitor.check_once(ledger)) == "watching"
     assert ledger.closed == []
+
+
+def test_lease_owner_is_forwarded_to_close(monkeypatch):
+    ledger = Ledger({"id": "leased-position", "symbol": "BTC-USDT-SWAP", "side": 1, "stop": 99000})
+    monkeypatch.setattr(firestore_monitor, "quote", AsyncMock(return_value=98000))
+    class Lease:
+        worker_id = "lease-owner"
+        def is_owner(self):
+            return True
+    assert asyncio.run(firestore_monitor.check_once(ledger, lease=Lease())) == "closed"
+    assert ledger.closed == [(98000, "leased-position")]
