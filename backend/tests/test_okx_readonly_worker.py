@@ -71,4 +71,4 @@ def test_worker_persists_verified_terminal_fill():
                                  lease=Lease(), journal=journal))
     assert journal.saved == [("worker-1", filled)]
     assert not ledger.written.healthy
-    assert ledger.written.reason == "transition_requires_fresh_poll"
+    assert ledger.written.reason == "filled_order_requires_position_reconciliation"
