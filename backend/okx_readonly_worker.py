@@ -48,6 +48,7 @@ async def poll_once(*, reader, ledger, lease, journal=None,
                              persist_positions=persist_positions)
     if fill_store is not None and status.healthy:
         try:
+            checkpoint_before = await asyncio.to_thread(fill_store.read_checkpoint)
             latest = await recent_swap_fills(reader)
             appended, reason = await asyncio.to_thread(
                 fill_store.append_verified_window, lease.worker_id,
@@ -55,6 +56,11 @@ async def poll_once(*, reader, ledger, lease, journal=None,
             if not appended:
                 status = replace(status, healthy=False,
                                  reason='fill_checkpoint_' + reason,
+                                 orders_matched=False)
+            elif checkpoint_before is not None and latest and (
+                    next(iter(latest.values())).trade_id != checkpoint_before.anchor_id):
+                status = replace(status, healthy=False,
+                                 reason='new_fills_require_fresh_poll',
                                  orders_matched=False)
         except Exception:
             LOG.exception('OKX fill checkpoint reconciliation failed')
