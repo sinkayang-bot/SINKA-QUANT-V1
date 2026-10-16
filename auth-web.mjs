@@ -1,6 +1,6 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
-import {createStatusSession} from './readonly-session.mjs';
-import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=diagnostics-1';
+import {createStatusSession} from './readonly-session.mjs?v=diagnostics-2';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=diagnostics-2';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
@@ -15,6 +15,9 @@ const messages = {
   expired: '上次查詢已過期，請重新更新。', login_expired: '登入已失效，請登出後重新登入。',
   forbidden: '此帳號沒有查詢權限。', busy: '已有查詢正在處理，請稍後手動更新。',
   unavailable: '目前無法查詢，請稍後重試。', timeout: '查詢逾時，請稍後重試。',
+  login_unavailable: '無法取得登入驗證，請登出後重新登入再試。',
+  network_error: '無法連到唯讀服務，請確認網路後再試。',
+  server_error: '唯讀服務回報錯誤，本次無法確認連線；可複製診斷摘要協助排查。',
   invalid_result: '結果未通過完整核對，目前無法確認連線。',
 };
 let auth, sdk, authBusy = false;

@@ -72,10 +72,21 @@ test('stalled token request times out and clears checking state',async()=>{
   [...h.timers.values()].find(t=>t.ms===40000).fn();await pending;
   assert.equal(h.s.getState().phase,'timeout');assert.equal(h.calls.length,0);
 });
-for(const [code,phase] of [[401,'login_expired'],[403,'forbidden'],[429,'busy'],[503,'unavailable']])
+for(const [code,phase] of [[401,'login_expired'],[403,'forbidden'],[429,'busy'],[503,'server_error'],[504,'timeout']])
   test(`HTTP ${code} cannot retain a verified state`,async()=>{
-    const h=setup({fetcher:async()=>({ok:false,status:code})});h.s.setUser(h.user);await h.s.refresh();
-    assert.deepEqual(h.s.getState(),{phase,verified:false});
+    let calls=0;
+    const h=setup({fetcher:async()=>++calls===1?{ok:true,status:200,json:async()=>payload()}:{ok:false,status:code}});
+    h.s.setUser(h.user);await h.s.refresh();assert.equal(h.s.getState().verified,true);
+    await h.s.refresh();
+    assert.deepEqual(h.s.getState(),{phase,verified:false,failureStage:'response',httpStatus:code});
+  });
+for (const [stage,phase] of [['token','login_unavailable'],['request','network_error'],['response','invalid_result']])
+  test(`failure at ${stage} is classified without retaining raw errors`,async()=>{
+    const fail=()=>{throw new Error('private-token secret-account-detail');};
+    const h=setup({fetcher:stage==='request'?fail:async()=>({ok:true,status:200,json:fail})});
+    h.s.setUser(stage==='token'?{getIdToken:fail}:h.user); await h.s.refresh();
+    assert.equal(h.s.getState().phase,phase);assert.equal(h.s.getState().failureStage,stage);
+    assert.equal(h.s.getState().verified,false);assert.ok(!JSON.stringify(h.changes).includes('private-token'));
   });
 test('conflicting, incomplete and stale responses fail validation',()=>{
   for(const data of [null,{...payload(),trading_enabled:true},{...payload(),api_permissions_readonly:false},

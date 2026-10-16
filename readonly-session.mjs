@@ -49,7 +49,7 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
     clearExpiry();
     const version = ++generation, selected = user;
     const controller = new AbortController(); pending = controller;
-    let requestTimer;
+    let requestTimer, failureStage = 'token', httpStatus = null;
     const deadline = new Promise((resolve, reject) => {
       requestTimer = setTimer(() => {controller.abort(); reject(new Error('timeout'));}, 40000);
     });
@@ -57,30 +57,37 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
     try {
       const token = await Promise.race([selected.getIdToken(), deadline]);
       if (version !== generation || controller.signal.aborted) return;
+      failureStage = 'request';
       const response = await Promise.race([fetcher(endpoint, {
         method: 'GET', headers: {Authorization: 'Bearer ' + token},
         cache: 'no-store', credentials: 'omit', redirect: 'error',
         referrerPolicy: 'no-referrer', signal: controller.signal,
       }), deadline]);
       if (version !== generation || controller.signal.aborted) return;
+      failureStage = 'response';
+      if (Number.isInteger(response.status) && response.status >= 100 && response.status <= 599) httpStatus = response.status;
       if (!response.ok) {
         publish(response.status === 401 ? 'login_expired' : response.status === 403 ? 'forbidden' :
-          response.status === 429 ? 'busy' : 'unavailable');
+          response.status === 429 ? 'busy' : response.status === 504 ? 'timeout' :
+          response.status >= 500 ? 'server_error' : 'unavailable', {failureStage, httpStatus});
         return;
       }
       const data = await Promise.race([response.json(), deadline]);
       if (version !== generation || controller.signal.aborted) return;
+      failureStage = 'validation';
       const clean = verifiedResult(data, now());
-      if (!clean) { publish('invalid_result'); return; }
+      if (!clean) { publish('invalid_result', {failureStage, httpStatus}); return; }
       publish('verified', clean);
       expiryTimer = setTimer(() => { if (version === generation) checkExpiry(); }, Math.min(30000, clean.expiresAt - now()));
     } catch {
-      if (version === generation) publish(controller.signal.aborted ? 'timeout' : 'unavailable');
+      if (version === generation) publish(controller.signal.aborted ? 'timeout' :
+        failureStage === 'token' ? 'login_unavailable' : failureStage === 'request' ? 'network_error' :
+        'invalid_result', {failureStage, httpStatus});
     } finally {
       clearTimer(requestTimer);
       if (pending === controller) pending = null;
       // A stalled token refresh must not leave a verified indicator behind.
-      if (version === generation && state.phase === 'checking') publish('timeout');
+      if (version === generation && state.phase === 'checking') publish('timeout', {failureStage, httpStatus});
     }
   }
   return {setUser, refresh, checkExpiry, getState: () => {checkExpiry(); return {...state};}};

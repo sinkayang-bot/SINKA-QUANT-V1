@@ -16,8 +16,13 @@ test('copied evidence expires even when a timer was delayed', () => {
   assert.equal(result.checked_at,null); assert.equal(result.valid_until,null);
 });
 test('unknown states and arbitrary timestamp strings cannot leak into diagnostics', () => {
-  const output=diagnosticSummary({phase:'SECRET_VALUE',checkedAt:'SECRET_VALUE',validUntil:'SECRET_VALUE'},context,now);
+  const output=diagnosticSummary({phase:'SECRET_VALUE',checkedAt:'SECRET_VALUE',validUntil:'SECRET_VALUE',failureStage:'SECRET_VALUE',httpStatus:'SECRET_VALUE'},context,now);
   assert.ok(!output.includes('SECRET_VALUE')); assert.equal(JSON.parse(output).query_state,'unknown');
+});
+test('diagnostics retain only fixed failure stages and numeric HTTP status', () => {
+  const result=JSON.parse(diagnosticSummary({phase:'server_error',failureStage:'response',httpStatus:503},context,now));
+  assert.equal(result.failure_stage,'response');assert.equal(result.http_status,503);
+  assert.equal(result.verified_at_copy,false);assert.equal(result.checked_at,null);
 });
 test('signed-out or unconfigured service cannot produce verified diagnostics', () => {
   for (const flags of [{signedIn:false,serviceConfigured:true},{signedIn:true,serviceConfigured:false}]) {
