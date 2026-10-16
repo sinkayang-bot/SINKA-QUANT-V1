@@ -66,7 +66,8 @@ def test_verified_partial_fill_is_persisted():
     persist = AsyncMock(return_value=True)
     result = asyncio.run(sync_once(reader=obj, local_position=None,
                                    tracked_orders=[prior], persist_verified=persist))
-    assert result.healthy
+    assert not result.healthy
+    assert result.reason == "transition_requires_fresh_poll"
     persist.assert_awaited_once_with(partial)
 
 def test_rejected_journal_write_fails_closed():
@@ -93,3 +94,48 @@ def test_pending_mismatch_never_persists():
                                    tracked_orders=[prior], persist_verified=persist))
     assert not result.healthy
     persist.assert_not_awaited()
+
+def test_missing_persistence_blocks_transition():
+    previous = parse_order({"ordId": "999", "clOrdId": "sinka999",
+                            "instId": "BTC-USDT-SWAP", "state": "live",
+                            "sz": "10", "accFillSz": "0"})
+    updated = parse_order({"ordId": "999", "clOrdId": "sinka999",
+                           "instId": "BTC-USDT-SWAP", "state": "filled",
+                           "sz": "10", "accFillSz": "10"})
+    obj = reader()
+    obj.refresh = AsyncMock(return_value=updated)
+    result = asyncio.run(sync_once(reader=obj, local_position=None,
+                                   tracked_orders=[previous]))
+    assert result.reason == "journal_persistence_unavailable"
+    assert not result.healthy
+
+def test_changed_positions_during_poll_fail_closed():
+    class Race:
+        calls = 0
+        async def swap_positions(self):
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            return [{"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
+                     "posSide": "long", "pos": "1"}]
+        async def get(self, path, params):
+            return []
+    status = asyncio.run(sync_once(reader=Race(), local_position=None))
+    assert not status.healthy
+    assert status.reason == "position_changed_during_sync"
+
+def test_changed_pending_orders_during_poll_fail_closed():
+    class Race:
+        calls = 0
+        async def swap_positions(self):
+            return []
+        async def get(self, path, params):
+            self.calls += 1
+            if self.calls == 1:
+                return []
+            return [{"ordId": "100", "clOrdId": "sinka100",
+                     "instId": "BTC-USDT-SWAP", "state": "live",
+                     "sz": "1", "accFillSz": "0"}]
+    status = asyncio.run(sync_once(reader=Race(), local_position=None))
+    assert not status.healthy
+    assert status.reason == "orders_changed_during_sync"
