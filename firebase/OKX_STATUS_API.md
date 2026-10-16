@@ -65,3 +65,30 @@ requests were performed while implementing this candidate.
 References: [Firebase ID token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens),
 [revoked-session checks](https://firebase.google.com/docs/auth/admin/manage-sessions),
 [FastAPI response headers](https://fastapi.tiangolo.com/advanced/response-headers/).
+
+## Read-only login configuration check
+
+From the repository root in the operator's Cloud Shell session:
+
+```bash
+python3 backend/firebase_login_preflight.py
+```
+
+This uses an existing gcloud access token only in memory, then sends three GET
+requests to fixed Google endpoints: Authentication project configuration,
+Google provider configuration, and Firebase web-app metadata. Redirects are
+blocked to prevent forwarding the token elsewhere. Output contains only fixed
+prerequisite flags and sanitized error categories. OAuth client secrets,
+access tokens, Firebase API keys, app identifiers and account identities are
+never printed. No user list or secret payload is requested.
+
+Check `google_signin_enabled`, `pages_domain_authorized`, and
+`web_app_available`. `login_prerequisites_ready` requires all three; it does not
+mean the owner UID is resolved or the Cloud Run status API is deployed. A 403
+is reported as `api_disabled_or_permission_denied`; the tool does not silently
+activate APIs or grant access. A missing provider or configuration is reported
+as `not_configured`.
+
+References: [Authentication configuration GET](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v2/projects/getConfig),
+[Google provider GET](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v2/projects.defaultSupportedIdpConfigs/get),
+[web-app metadata list](https://firebase.google.com/docs/reference/firebase-management/rest/v1beta1/projects.webApps/list).
