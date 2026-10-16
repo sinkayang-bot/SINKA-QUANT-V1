@@ -17,7 +17,7 @@ def evaluate(*, local_position, exchange_positions, instrument,
              side, contracts, price, stop, equity_usdt, leverage,
              monitor_healthy, orders_synced, kill_switch,
              demo_verified, live_requested=False, sync_status=None,
-             current_session_verified=False):
+             current_session_verified=False, pending_order_count=None):
     if live_requested:
         return Admission(False, "live_trading_locked")
     freshness = assess_sync(sync_status, current_session_verified=current_session_verified)
@@ -29,6 +29,10 @@ def evaluate(*, local_position, exchange_positions, instrument,
         return Admission(False, "monitor_unhealthy")
     if not orders_synced:
         return Admission(False, "orders_not_reconciled")
+    if type(pending_order_count) is not int or pending_order_count < 0:
+        return Admission(False, "pending_order_count_unverified")
+    if pending_order_count:
+        return Admission(False, "pending_orders_exist")
     if not demo_verified:
         return Admission(False, "demo_not_verified")
     try:
