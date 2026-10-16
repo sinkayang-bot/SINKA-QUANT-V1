@@ -37,11 +37,25 @@ async def sync_once(*, reader: OKXOrderReader, local_position,
             return SyncStatus(False, "pending_order_mismatch", now, True, False)
         # Commit only after the entire pending-order snapshot matches.
         # Persistence failures must mark this iteration unsuccessful.
+        changed = [(previous, current) for previous, current in zip(tracked_orders, refreshed)
+                   if previous != current]
+        if changed and persist_verified is None:
+            return SyncStatus(False, "journal_persistence_unavailable", now, True, False)
         if persist_verified is not None:
-            for previous, current in zip(tracked_orders, refreshed):
-                if previous != current:
-                    if not await persist_verified(current):
-                        return SyncStatus(False, "journal_write_denied", now, True, False)
+            for previous, current in changed:
+                if not await persist_verified(current):
+                    return SyncStatus(False, "journal_write_denied", now, True, False)
+        if changed:
+            # Exchange position and order feeds can lag each other. Require a
+            # separate complete poll after a transition, never advertise ready.
+            return SyncStatus(False, "transition_requires_fresh_poll", now, True, False)
+        # Detect account changes during the multi-request synchronization.
+        second_positions = await reader.swap_positions()
+        if second_positions != positions:
+            return SyncStatus(False, "position_changed_during_sync", now, False, False)
+        second_inventory = await pending_swap_inventory(reader)
+        if second_inventory != inventory:
+            return SyncStatus(False, "orders_changed_during_sync", now, True, False)
         return SyncStatus(True, "synced", now, True, True)
     except Exception:
         # No credentials or response bodies in errors returned to callers.
