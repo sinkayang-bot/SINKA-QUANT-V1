@@ -94,3 +94,45 @@ def test_position_write_rejection_marks_sync_unhealthy():
                                  lease=Lease(), position_journal=position_journal))
     assert not ledger.written.healthy
     assert ledger.written.reason == "position_journal_write_denied"
+
+class FillStore:
+    def __init__(self, result):
+        self.result = result
+        self.windows = []
+    def append_verified_window(self, worker_id, window):
+        self.windows.append((worker_id, window))
+        return self.result
+
+def test_missing_initial_fill_baseline_never_reports_healthy():
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    store = FillStore((False, "initial_baseline_required"))
+    ledger = Ledger()
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=store))
+    assert store.windows == [("worker-1", ())]
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "fill_checkpoint_initial_baseline_required"
+
+def test_fill_watermark_write_rejection_marks_unhealthy():
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    ledger = Ledger()
+    store = FillStore((False, "lease_denied"))
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=store))
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "fill_checkpoint_lease_denied"
+
+def test_verified_checkpoint_is_diagnostic_only():
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    ledger = Ledger()
+    store = FillStore((True, "overlap_appended"))
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=store))
+    assert ledger.written.healthy
+    assert store.windows == [("worker-1", ())]
