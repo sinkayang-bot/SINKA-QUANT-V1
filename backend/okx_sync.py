@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from okx_reconcile import reconcile_positions
 from okx_order_reader import OKXOrderReader
+from okx_pending_orders import pending_swap_inventory, verify_pending_inventory
 
 @dataclass(frozen=True)
 class SyncStatus:
@@ -16,7 +17,7 @@ class SyncStatus:
     orders_matched: bool
 
 async def sync_once(*, reader: OKXOrderReader, local_position,
-                    tracked_orders=(), orders_inventory_verified=False):
+                    tracked_orders=()):
     now = datetime.now(timezone.utc).isoformat()
     try:
         positions = await reader.swap_positions()
@@ -25,11 +26,15 @@ async def sync_once(*, reader: OKXOrderReader, local_position,
         position_status = reconcile_positions(local_position, positions)
         if not position_status["ready"]:
             return SyncStatus(False, position_status["reason"], now, False, False)
+        inventory = await pending_swap_inventory(reader)
+        refreshed = []
         for prior in tracked_orders:
             if prior.state not in ("filled", "canceled", "mmp_canceled"):
-                await reader.refresh(prior)
-        if not orders_inventory_verified:
-            return SyncStatus(False, "order_inventory_unverified", now, True, False)
+                refreshed.append(await reader.refresh(prior))
+            else:
+                refreshed.append(prior)
+        if not verify_pending_inventory(inventory, refreshed):
+            return SyncStatus(False, "pending_order_mismatch", now, True, False)
         return SyncStatus(True, "synced", now, True, True)
     except Exception:
         # No credentials or response bodies in errors returned to callers.
