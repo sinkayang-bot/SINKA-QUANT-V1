@@ -96,47 +96,54 @@ def test_position_write_rejection_marks_sync_unhealthy():
     assert not ledger.written.healthy
     assert ledger.written.reason == "position_journal_write_denied"
 
-class FillStore:
-    def __init__(self, checkpoint, accepts=True):
-        self.checkpoint = checkpoint
-        self.accepts = accepts
-        self.saved = []
-    def read_checkpoint(self):
-        return self.checkpoint
-    def append_verified_window(self, worker_id, window):
-        self.saved.append((worker_id, tuple(window)))
-        return self.accepts, "overlap_appended" if self.accepts else "lease_denied"
-
-def test_missing_initial_fill_baseline_never_reports_healthy():
+def test_missing_initial_fill_baseline_never_reports_healthy(monkeypatch):
+    import okx_readonly_worker
     class Reader:
         swap_positions = AsyncMock(return_value=[])
         get = AsyncMock(return_value=[])
+    mocked = AsyncMock(return_value=(False, "initial_baseline_required"))
+    monkeypatch.setattr(okx_readonly_worker, "audit_fill_window", mocked)
     ledger = Ledger()
-    store = FillStore(None)
     assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(),
-                                 fill_store=store))
-    assert store.saved == []
+                                 position_journal=PositionJournal(), fill_store=object()))
     assert not ledger.written.healthy
     assert ledger.written.reason == "initial_baseline_required"
+    mocked.assert_awaited_once()
 
-def test_fill_watermark_write_rejection_marks_unhealthy():
-    from okx_fills import parse_fill
-    from okx_fill_checkpoint import FillCheckpoint
-    old = parse_fill({"tradeId": "10", "ordId": "100",
-                      "instId": "BTC-USDT-SWAP", "side": "buy",
-                      "fillSz": "1", "fillPx": "100"})
+def test_fill_watermark_write_rejection_marks_unhealthy(monkeypatch):
+    import okx_readonly_worker
     class Reader:
         swap_positions = AsyncMock(return_value=[])
-        get = AsyncMock(return_value=[{
-            "tradeId": "10", "billId": "110", "ordId": "100",
-            "instId": "BTC-USDT-SWAP", "side": "buy",
-            "fillSz": "1", "fillPx": "100"}])
+        get = AsyncMock(return_value=[])
+    monkeypatch.setattr(okx_readonly_worker, "audit_fill_window",
+                        AsyncMock(return_value=(False, "lease_denied")))
     ledger = Ledger()
-    store = FillStore(FillCheckpoint(old.trade_id, old), accepts=False)
     assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(),
-                                 fill_store=store))
+                                 position_journal=PositionJournal(), fill_store=object()))
     assert not ledger.written.healthy
-    assert ledger.written.reason == "fill_order_quantity_mismatch"
-    assert store.saved == []
+    assert ledger.written.reason == "lease_denied"
+
+def test_verified_checkpoint_diagnostic_only(monkeypatch):
+    import okx_readonly_worker
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    monkeypatch.setattr(okx_readonly_worker, "audit_fill_window",
+                        AsyncMock(return_value=(True, "fill_overlap_audited")))
+    ledger = Ledger()
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=object()))
+    assert ledger.written.healthy
+
+def test_new_fill_requires_fresh_poll(monkeypatch):
+    import okx_readonly_worker
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    monkeypatch.setattr(okx_readonly_worker, "audit_fill_window",
+                        AsyncMock(return_value=(False, "new_fills_require_fresh_poll")))
+    ledger = Ledger()
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=object()))
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "new_fills_require_fresh_poll"
