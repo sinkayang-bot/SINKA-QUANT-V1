@@ -17,7 +17,7 @@ class SyncStatus:
     orders_matched: bool
 
 async def sync_once(*, reader: OKXOrderReader, local_position,
-                    tracked_orders=()):
+                    tracked_orders=(), persist_verified=None):
     now = datetime.now(timezone.utc).isoformat()
     try:
         positions = await reader.swap_positions()
@@ -35,6 +35,13 @@ async def sync_once(*, reader: OKXOrderReader, local_position,
                 refreshed.append(prior)
         if not verify_pending_inventory(inventory, refreshed):
             return SyncStatus(False, "pending_order_mismatch", now, True, False)
+        # Commit only after the entire pending-order snapshot matches.
+        # Persistence failures must mark this iteration unsuccessful.
+        if persist_verified is not None:
+            for previous, current in zip(tracked_orders, refreshed):
+                if previous != current:
+                    if not await persist_verified(current):
+                        return SyncStatus(False, "journal_write_denied", now, True, False)
         return SyncStatus(True, "synced", now, True, True)
     except Exception:
         # No credentials or response bodies in errors returned to callers.
