@@ -1,4 +1,4 @@
-import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs';
+import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
 import {createStatusSession} from './readonly-session.mjs';
 
 const $ = id => document.getElementById(id);
