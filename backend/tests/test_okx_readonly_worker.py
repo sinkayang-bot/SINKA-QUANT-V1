@@ -99,6 +99,8 @@ class FillStore:
     def __init__(self, result):
         self.result = result
         self.windows = []
+    def read_checkpoint(self):
+        return None
     def append_verified_window(self, worker_id, window):
         self.windows.append((worker_id, window))
         return self.result
@@ -136,3 +138,30 @@ def test_verified_checkpoint_is_diagnostic_only():
                                  position_journal=PositionJournal(), fill_store=store))
     assert ledger.written.healthy
     assert store.windows == [("worker-1", ())]
+
+def test_new_fill_forces_next_cycle():
+    from okx_fills import parse_fill
+    from okx_fill_checkpoint import FillCheckpoint
+    old = parse_fill({"tradeId": "10", "ordId": "100",
+                      "instId": "BTC-USDT-SWAP", "side": "buy",
+                      "fillSz": "1", "fillPx": "100"})
+    new = parse_fill({"tradeId": "11", "ordId": "100",
+                      "instId": "BTC-USDT-SWAP", "side": "buy",
+                      "fillSz": "1", "fillPx": "100"})
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[
+            {"tradeId": "11", "billId": "111", "ordId": "100",
+             "instId": "BTC-USDT-SWAP", "side": "buy",
+             "fillSz": "1", "fillPx": "100"},
+            {"tradeId": "10", "billId": "110", "ordId": "100",
+             "instId": "BTC-USDT-SWAP", "side": "buy",
+             "fillSz": "1", "fillPx": "100"},
+        ])
+    ledger = Ledger()
+    store = FillStore((True, "overlap_appended"))
+    store.read_checkpoint = lambda: FillCheckpoint(old.trade_id, old)
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                 position_journal=PositionJournal(), fill_store=store))
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "new_fills_require_fresh_poll"
