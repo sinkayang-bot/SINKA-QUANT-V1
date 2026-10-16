@@ -11,6 +11,7 @@ MAX_PAGES = 20
 
 async def pending_swap_inventory(reader):
     found = {}
+    client_ids = set()
     cursor = None
     for _ in range(MAX_PAGES):
         params = {"instType": "SWAP", "limit": str(PAGE_SIZE)}
@@ -25,9 +26,10 @@ async def pending_swap_inventory(reader):
             record = parse_order(row)
             if record.state not in ACTIVE:
                 raise ValueError("Unexpected terminal order in pending list")
-            if record.order_id in found:
-                raise ValueError("Repeated pending order across pages")
+            if record.order_id in found or record.client_order_id in client_ids:
+                raise ValueError("Repeated pending order identity across pages")
             found[record.order_id] = record
+            client_ids.add(record.client_order_id)
         if len(rows) < PAGE_SIZE:
             return found
         last_id = str(rows[-1].get("ordId", ""))
