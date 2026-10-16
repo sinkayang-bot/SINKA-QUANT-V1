@@ -13,6 +13,7 @@ ALLOWED_PATHS = frozenset({
     "/api/v5/account/positions",
     "/api/v5/account/config",
     "/api/v5/trade/order",
+    "/api/v5/trade/orders-pending",
     "/api/v5/public/instruments",
 })
 ALLOWED_SYMBOLS = frozenset({
@@ -49,6 +50,13 @@ class OKXReadOnly:
         if path not in ALLOWED_PATHS:
             raise ValueError("Endpoint not permitted in read-only adapter")
         params = params or {}
+        if path == "/api/v5/trade/orders-pending":
+            if params.get("instType") != "SWAP" or params.get("limit") != "100":
+                raise ValueError("Pending-order scan requires SWAP and full page size")
+            if any(k not in ("instType", "limit", "after") for k in params):
+                raise ValueError("Unsupported pending-order query parameter")
+            if "after" in params and not str(params["after"]).isdigit():
+                raise ValueError("Invalid pending-order cursor")
         if path == "/api/v5/trade/order":
             if params.get("instId") not in ALLOWED_SYMBOLS or bool(params.get("ordId")) == bool(params.get("clOrdId")):
                 raise ValueError("Order lookup requires allowlisted instrument and exactly one identifier")
