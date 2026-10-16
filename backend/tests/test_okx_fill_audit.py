@@ -74,3 +74,14 @@ def test_store_denial_keeps_unhealthy():
              "instId": "BTC-USDT-SWAP", "side": "buy",
              "fillSz": "1", "fillPx": "100000"}]
     assert run(store, rows, [order]) == (False, "lease_denied")
+
+def test_replay_of_same_anchor_is_diagnostic_only():
+    prior = fill(10)
+    store = Store(FillCheckpoint(prior.trade_id, prior))
+    order = parse_order({"ordId": "123", "clOrdId": "sinka123",
+                         "instId": "BTC-USDT-SWAP", "state": "filled",
+                         "sz": "1", "accFillSz": "1"})
+    rows = [{"tradeId": "10", "billId": "1990", "ordId": "123",
+             "instId": "BTC-USDT-SWAP", "side": "buy",
+             "fillSz": "1", "fillPx": "100000"}]
+    assert run(store, rows, [order]) == (True, "fill_overlap_audited")
