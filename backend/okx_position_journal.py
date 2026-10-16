@@ -4,7 +4,7 @@ A stored snapshot never grants trading authorization or resolves filled orders.
 """
 import time
 from google.cloud import firestore
-from okx_reconcile import reconcile_positions, number
+from okx_reconcile import number
 from okx_readonly import ALLOWED_SYMBOLS
 
 def normalize_positions(rows):
@@ -26,8 +26,8 @@ def normalize_positions(rows):
         side = row.get("posSide")
         if side not in ("net", "long", "short"):
             raise ValueError("Invalid position side")
-        if side == "long" and quantity < 0:
-            raise ValueError("Negative long position")
+        if side in ("long", "short") and quantity <= 0:
+            raise ValueError("Hedge-mode contracts must be positive")
         result.append({"symbol": row["instId"], "posSide": side,
                        "contracts": str(quantity), "marginMode": "isolated"})
     if len(result) > 1:
