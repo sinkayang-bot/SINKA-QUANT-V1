@@ -14,6 +14,9 @@ from okx_order_reader import OKXOrderReader
 from okx_order_journal import OKXOrderJournal
 from okx_position_journal import OKXPositionJournal
 from okx_fill_watermark_store import OKXFillWatermarkStore
+from okx_fill_audit import audit_fill_window
+from dataclasses import replace
+from okx_fill_watermark_store import OKXFillWatermarkStore
 from okx_fills import recent_swap_fills
 from okx_sync import sync_once
 from okx_sync_lease import OKXSyncLease
@@ -58,6 +61,13 @@ async def poll_once(*, reader, ledger, lease, journal=None,
             status = replace(status, healthy=False,
                              reason='fill_checkpoint_scan_failed',
                              orders_matched=False)
+    if status.healthy:
+        audited, reason = await audit_fill_window(
+            reader=reader, store=fill_store,
+            worker_id=lease.worker_id, tracked_orders=tracked)
+        if not audited:
+            status = replace(status, healthy=False, reason=reason,
+                             orders_matched=False)
     stored = await asyncio.to_thread(ledger.write, lease.worker_id, status)
     if not stored:
         LOG.warning("OKX sync lease lost; diagnostic update rejected")
@@ -96,6 +106,7 @@ def main():
     lease = OKXSyncLease(ledger)
     journal = OKXOrderJournal(ledger)
     position_journal = OKXPositionJournal(ledger)
+    fill_store = OKXFillWatermarkStore(ledger)
     fill_store = OKXFillWatermarkStore(ledger)
     reader = OKXOrderReader(demo=True)
     asyncio.run(run(reader=reader, ledger=ledger, lease=lease,
