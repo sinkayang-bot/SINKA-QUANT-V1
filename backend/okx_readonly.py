@@ -14,6 +14,7 @@ ALLOWED_PATHS = frozenset({
     "/api/v5/account/config",
     "/api/v5/trade/order",
     "/api/v5/trade/orders-pending",
+    "/api/v5/trade/fills",
     "/api/v5/public/instruments",
 })
 ALLOWED_SYMBOLS = frozenset({
@@ -50,6 +51,13 @@ class OKXReadOnly:
         if path not in ALLOWED_PATHS:
             raise ValueError("Endpoint not permitted in read-only adapter")
         params = params or {}
+        if path == "/api/v5/trade/fills":
+            if params.get("instType") != "SWAP" or params.get("limit") != "100":
+                raise ValueError("Fill scan requires SWAP and full page size")
+            if any(k not in ("instType", "limit", "after") for k in params):
+                raise ValueError("Unsupported fill query parameter")
+            if "after" in params and not str(params["after"]).isdigit():
+                raise ValueError("Invalid fill pagination cursor")
         if path == "/api/v5/trade/orders-pending":
             if params.get("instType") != "SWAP" or params.get("limit") != "100":
                 raise ValueError("Pending-order scan requires SWAP and full page size")
