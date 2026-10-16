@@ -50,6 +50,20 @@ jobs:
           fi
           grep -q "disabled by default" /tmp/okx-start.out
 
+  okx-smoke-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated demo-only smoke image
+        run: docker build -f backend/Dockerfile.okx-smoke -t sinka-okx-demo-smoke:ci backend
+      - name: Require explicit demo smoke opt-in
+        run: |
+          if docker run --rm sinka-okx-demo-smoke:ci > /tmp/okx-smoke.out 2>&1; then
+            echo "Unsafe: smoke image started without opt-in" >&2
+            exit 1
+          fi
+          grep -q "Demo mode must be explicitly enabled" /tmp/okx-smoke.out
+
   firestore-emulator:
     runs-on: ubuntu-latest
     env:
