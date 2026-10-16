@@ -37,6 +37,8 @@ class OKXFillWatermarkStore:
         if not snap.exists:
             return None
         payload = snap.to_dict()
+        if payload.get("baseline_reviewed") is not True:
+            raise ValueError("Unreviewed fill baseline")
         anchor = decode_fill(payload["anchor"])
         if anchor.trade_id != payload["anchor_id"]:
             raise ValueError("Corrupted fill watermark")
@@ -52,6 +54,8 @@ class OKXFillWatermarkStore:
         if not checkpoint_snap.exists:
             return False, "initial_baseline_required"
         existing = checkpoint_snap.to_dict()
+        if existing.get("baseline_reviewed") is not True:
+            return False, "baseline_review_required"
         anchor = decode_fill(existing["anchor"])
         previous = FillCheckpoint(existing["anchor_id"], anchor)
         if previous.anchor_id != anchor.trade_id:
