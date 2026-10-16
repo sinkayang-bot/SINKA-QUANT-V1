@@ -6,12 +6,15 @@ read-only credentials. No order execution, no automatic trade authorization.
 import asyncio
 import logging
 import os
+from dataclasses import replace
 
 from google.cloud import firestore
 from okx_firestore_sync import OKXSyncLedger
 from okx_order_reader import OKXOrderReader
 from okx_order_journal import OKXOrderJournal
 from okx_position_journal import OKXPositionJournal
+from okx_fill_watermark_store import OKXFillWatermarkStore
+from okx_fills import recent_swap_fills
 from okx_sync import sync_once
 from okx_sync_lease import OKXSyncLease
 
@@ -19,7 +22,7 @@ LOG = logging.getLogger("sinka.okx_readonly_worker")
 INTERVAL_SECONDS = 15
 
 async def poll_once(*, reader, ledger, lease, journal=None,
-                    position_journal=None):
+                    position_journal=None, fill_store=None):
     """One iteration; return False when another worker owns the lease."""
     if not await asyncio.to_thread(lease.acquire):
         return False
@@ -40,20 +43,37 @@ async def poll_once(*, reader, ledger, lease, journal=None,
                              tracked_orders=tracked,
                              persist_verified=persist_verified,
                              persist_positions=persist_positions)
+    if fill_store is not None and status.healthy:
+        try:
+            latest = await recent_swap_fills(reader)
+            appended, reason = await asyncio.to_thread(
+                fill_store.append_verified_window, lease.worker_id,
+                tuple(latest.values()))
+            if not appended:
+                status = replace(status, healthy=False,
+                                 reason='fill_checkpoint_' + reason,
+                                 orders_matched=False)
+        except Exception:
+            LOG.exception('OKX fill checkpoint reconciliation failed')
+            status = replace(status, healthy=False,
+                             reason='fill_checkpoint_scan_failed',
+                             orders_matched=False)
     stored = await asyncio.to_thread(ledger.write, lease.worker_id, status)
     if not stored:
         LOG.warning("OKX sync lease lost; diagnostic update rejected")
     return stored
 
 async def run(*, reader, ledger, lease, journal=None,
-              position_journal=None, delay=INTERVAL_SECONDS):
+              position_journal=None, fill_store=None,
+              delay=INTERVAL_SECONDS):
     """Keep polling; failures are not treated as a successful sync."""
     try:
         while True:
             try:
                 await poll_once(reader=reader, ledger=ledger, lease=lease,
                                 journal=journal,
-                                position_journal=position_journal)
+                                position_journal=position_journal,
+                                fill_store=fill_store)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -76,9 +96,11 @@ def main():
     lease = OKXSyncLease(ledger)
     journal = OKXOrderJournal(ledger)
     position_journal = OKXPositionJournal(ledger)
+    fill_store = OKXFillWatermarkStore(ledger)
     reader = OKXOrderReader(demo=True)
     asyncio.run(run(reader=reader, ledger=ledger, lease=lease,
-                    journal=journal, position_journal=position_journal))
+                    journal=journal, position_journal=position_journal,
+                    fill_store=fill_store))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
