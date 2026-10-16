@@ -1,0 +1,18 @@
+name: Frontend read-only auth tests
+on:
+  push:
+    paths: ['*.mjs', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+  pull_request:
+    paths: ['*.mjs', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check auth-web.mjs
+      - run: node --test tests/readonly-session.test.mjs
