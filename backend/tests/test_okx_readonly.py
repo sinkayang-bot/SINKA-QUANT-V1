@@ -28,3 +28,22 @@ def test_only_swap_positions_allowed():
 def test_trade_submission_remains_blocked():
     with pytest.raises(ValueError, match="not permitted"):
         asyncio.run(client().get("/api/v5/trade/cancel-order"))
+
+
+def test_transport_uses_only_get_with_demo_header(monkeypatch):
+    calls = []
+    class Response:
+        def raise_for_status(self): pass
+        def json(self): return {"code": "0", "data": []}
+    class Transport:
+        def __init__(self, **kwargs):
+            assert kwargs["base_url"] == "https://www.okx.com"
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def get(self, path, headers):
+            assert headers["x-simulated-trading"] == "1"
+            calls.append(path)
+            return Response()
+    monkeypatch.setattr("okx_readonly.httpx.AsyncClient", Transport)
+    assert asyncio.run(client().balances()) == []
+    assert calls == ["/api/v5/account/balance"]

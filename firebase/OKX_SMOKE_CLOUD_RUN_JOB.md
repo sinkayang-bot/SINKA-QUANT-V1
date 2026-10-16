@@ -27,3 +27,28 @@
 - `Dockerfile.okx-smoke` 的程式只允許經過白名單的 GET，且必須帶 OKX `x-simulated-trading: 1`。
 - 預設不執行，不排程，也不部署長駐 worker；真正模擬下單與真實資金下單均仍鎖定。
 - 一次成功的唯讀 smoke test **不代表**成交歷史或風控對帳完成，更不代表獲利能力或下單安全性。
+
+## 唯讀部署前檢查
+
+在 repository 根目錄執行：
+
+```bash
+python3 backend/okx_cloud_preflight.py
+```
+
+此工具固定使用 `sinka-quant` / `asia-east1`，只讀取必要 API、服務帳戶、
+三組 Secret 的 latest 版本狀態、Docker Standard repository 與 Job 是否存在。
+不讀取 Secret 內容、不修改 IAM、不建置、不部署，也不執行 Job。
+輸出 JSON，`metadata_ready: false` 時結束碼為 1；未登入、SDK 不存在或權限不足
+皆視為未就緒，不會輸出原始錯誤或秘密內容。
+
+`metadata_ready: true` **只表示上述資源的 metadata 檢查通過**，不代表
+Job 的容器設定已核對、執行身分具備 Secret Accessor、OKX API 權限正確或連線成功。
+這些項目分別保留 `false`，需後續獨立驗證。
+
+## 測試失敗診斷
+
+唯讀煙霧測試失敗時，JSON 的 `failed_stage` 會標示固定階段：
+`configuration`、`balances`、`positions`、`instruments` 或 `pending_orders`。
+任何查詢或資料驗證失敗，立即停止後續查詢；不顯示帳戶金額、持倉內容、
+訂單識別碼、API 回應本文或憑證。缺少憑證也只輸出固定診斷並以非零結束碼結束。
