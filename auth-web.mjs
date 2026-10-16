@@ -4,6 +4,8 @@ import {createStatusSession} from './readonly-session.mjs';
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
 const account = $('owner-account'), status = $('owner-status'), time = $('owner-checked');
+const checkRows = ['account-config', 'balances', 'positions', 'instruments', 'pending-orders']
+  .map(name => $('owner-check-' + name));
 const messages = {
   signed_out: '登入後可查詢模擬帳戶唯讀連線狀態。',
   signed_in: '已登入，按「更新唯讀狀態」進行單次查詢。',
@@ -18,6 +20,17 @@ let auth, sdk, authBusy = false;
 const session = createStatusSession({baseUrl: STATUS_API_BASE_URL, onChange: state => {
   status.textContent = messages[state.phase] || messages.unavailable;
   status.className = state.verified ? 'note up' : 'note';
+  // Only the complete validated response may mark any individual check passed.
+  const checkText = state.verified ? '通過' : state.phase === 'expired' ? '已過期' :
+    state.phase === 'checking' ? '等待結果' :
+    ['signed_out', 'signed_in', 'service_pending'].includes(state.phase) ? '尚未查詢' : '未確認';
+  for (const row of checkRows) {
+    if (!row) continue; // Older cached HTML still supports the summary status.
+    row.textContent = checkText;
+    row.className = state.verified ? 'up' : '';
+  }
+  refresh.textContent = state.phase === 'checking' ? '正在查詢…' : '更新唯讀狀態';
+  refresh.setAttribute('aria-busy', String(state.phase === 'checking'));
   refresh.disabled = !auth?.currentUser || !STATUS_API_BASE_URL || state.phase === 'checking' || authBusy;
   time.textContent = state.verified ? '檢查完成：' + new Date(state.checkedAt).toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'}) + '（台灣）；30 秒內有效。' : '';
 }});
