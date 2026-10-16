@@ -44,3 +44,30 @@ def test_fencing_rejects_stale_worker_write():
         get = AsyncMock(return_value=[])
     ledger = Ledger(accepts=False)
     assert not asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease()))
+
+def test_worker_persists_verified_terminal_fill():
+    from okx_orders import parse_order
+    prior = parse_order({"ordId": "123", "clOrdId": "sinka123",
+                         "instId": "BTC-USDT-SWAP", "state": "live",
+                         "sz": "2", "accFillSz": "0"})
+    filled = parse_order({"ordId": "123", "clOrdId": "sinka123",
+                          "instId": "BTC-USDT-SWAP", "state": "filled",
+                          "sz": "2", "accFillSz": "2"})
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+        refresh = AsyncMock(return_value=filled)
+    class Journal:
+        def __init__(self):
+            self.saved = []
+        def list_tracked(self):
+            return [prior]
+        def refresh(self, worker_id, order):
+            self.saved.append((worker_id, order))
+            return True
+    ledger = Ledger()
+    journal = Journal()
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger,
+                                 lease=Lease(), journal=journal))
+    assert journal.saved == [("worker-1", filled)]
+    assert ledger.written.healthy
