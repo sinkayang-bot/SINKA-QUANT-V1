@@ -150,14 +150,16 @@ def test_new_fill_forces_next_cycle():
                       "fillSz": "1", "fillPx": "100"})
     class Reader:
         swap_positions = AsyncMock(return_value=[])
-        get = AsyncMock(return_value=[
+        fill_rows = [
             {"tradeId": "11", "billId": "111", "ordId": "100",
              "instId": "BTC-USDT-SWAP", "side": "buy",
              "fillSz": "1", "fillPx": "100"},
             {"tradeId": "10", "billId": "110", "ordId": "100",
              "instId": "BTC-USDT-SWAP", "side": "buy",
              "fillSz": "1", "fillPx": "100"},
-        ])
+        ]
+        async def get(self, path, params):
+            return self.fill_rows if path == "/api/v5/trade/fills" else []
     ledger = Ledger()
     store = FillStore((True, "overlap_appended"))
     store.read_checkpoint = lambda: FillCheckpoint(old.trade_id, old)
