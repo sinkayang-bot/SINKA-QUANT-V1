@@ -53,7 +53,7 @@ def test_overlapping_fills_are_committed_once():
          "instId": "BTC-USDT-SWAP", "side": "buy",
          "fillSz": "1", "fillPx": "100000"},
     ]
-    assert run(store, rows, [order]) == (True, "fill_overlap_audited")
+    assert run(store, rows, [order]) == (False, "new_fills_require_fresh_poll")
     assert [f.trade_id for f in store.saved[0][1]] == ["11", "10"]
 
 def test_missing_anchor_never_writes():
