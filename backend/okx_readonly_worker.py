@@ -23,8 +23,14 @@ async def poll_once(*, reader, ledger, lease, journal=None):
         return False
     # Read existing journal records; no unknown exchange orders are auto-adopted.
     tracked = await asyncio.to_thread(journal.list_tracked) if journal else []
+    async def persist_verified(order):
+        if journal is None:
+            return False
+        return await asyncio.to_thread(journal.refresh, lease.worker_id, order)
+
     status = await sync_once(reader=reader, local_position=None,
-                             tracked_orders=tracked)
+                             tracked_orders=tracked,
+                             persist_verified=persist_verified)
     stored = await asyncio.to_thread(ledger.write, lease.worker_id, status)
     if not stored:
         LOG.warning("OKX sync lease lost; diagnostic update rejected")
