@@ -1,6 +1,6 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
-import {createStatusSession} from './readonly-session.mjs?v=diagnostics-2';
-import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=diagnostics-2';
+import {createStatusSession} from './readonly-session.mjs?v=freshness-1';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=freshness-1';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
@@ -37,9 +37,9 @@ const session = createStatusSession({baseUrl: STATUS_API_BASE_URL, onChange: sta
     row.textContent = checkText;
     row.className = state.verified ? 'up' : '';
   }
-  refresh.textContent = state.phase === 'checking' ? '正在查詢…' : '更新唯讀狀態';
+  refresh.textContent = state.phase === 'checking' ? '正在查詢…' : state.verified ? '結果有效中' : '更新唯讀狀態';
   refresh.setAttribute('aria-busy', String(state.phase === 'checking'));
-  refresh.disabled = !auth?.currentUser || !STATUS_API_BASE_URL || state.phase === 'checking' || authBusy;
+  refresh.disabled = !auth?.currentUser || !STATUS_API_BASE_URL || state.phase === 'checking' || state.verified || authBusy;
   time.textContent = state.verified ? '檢查完成：' + new Date(state.checkedAt).toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'}) + '（台灣）；30 秒內有效。' : '';
 }});
 function renderUser(user) {
@@ -63,7 +63,8 @@ login.addEventListener('click', async () => {
   } catch (error) { loginError(error); }
   finally {
     authBusy = false; login.disabled = false; session.checkExpiry();
-    refresh.disabled = !auth.currentUser || !STATUS_API_BASE_URL || session.getState().phase === 'checking';
+    const state = session.getState();
+    refresh.disabled = !auth.currentUser || !STATUS_API_BASE_URL || state.phase === 'checking' || state.verified;
   }
 });
 logout.addEventListener('click', async () => {

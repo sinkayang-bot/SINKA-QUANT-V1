@@ -19,7 +19,9 @@ export function verifiedResult(data, now) {
   const checked = Date.parse(data.checked_at), until = Date.parse(data.valid_until);
   if (!Number.isFinite(checked) || !Number.isFinite(until) || checked > now + 5000 ||
       until <= now || until <= checked || until - checked > 30000) return null;
-  return {checkedAt: data.checked_at, validUntil: data.valid_until, expiresAt: until};
+  // A tolerated server clock lead must not extend local evidence past 30 seconds.
+  const expiresAt = Math.min(until, now + 30000);
+  return {checkedAt: data.checked_at, validUntil: new Date(expiresAt).toISOString(), expiresAt};
 }
 
 export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
@@ -44,7 +46,9 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
     }
   }
   async function refresh() {
+    checkExpiry();
     if (!user || pending) return;
+    if (state.verified) return; // Reuse still-valid evidence without requesting a token.
     if (!endpoint) { publish('service_pending'); return; }
     clearExpiry();
     const version = ++generation, selected = user;

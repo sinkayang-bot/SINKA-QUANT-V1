@@ -1,4 +1,4 @@
-export const FRONTEND_VERSION = 'readonly-diagnostics-2';
+export const FRONTEND_VERSION = 'readonly-freshness-1';
 const PHASES = new Set(['signed_out', 'signed_in', 'service_pending', 'checking',
   'verified', 'expired', 'login_expired', 'forbidden', 'busy', 'unavailable',
   'timeout', 'invalid_result', 'login_unavailable', 'network_error', 'server_error']);

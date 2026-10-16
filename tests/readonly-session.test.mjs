@@ -77,6 +77,7 @@ for(const [code,phase] of [[401,'login_expired'],[403,'forbidden'],[429,'busy'],
     let calls=0;
     const h=setup({fetcher:async()=>++calls===1?{ok:true,status:200,json:async()=>payload()}:{ok:false,status:code}});
     h.s.setUser(h.user);await h.s.refresh();assert.equal(h.s.getState().verified,true);
+    h.setTime(START+31000);
     await h.s.refresh();
     assert.deepEqual(h.s.getState(),{phase,verified:false,failureStage:'response',httpStatus:code});
   });
@@ -98,4 +99,24 @@ test('exchange extra fields never enter frontend state',async()=>{
   h.s.setUser(h.user);await h.s.refresh();assert.equal(h.s.getState().verified,true);
   assert.equal(JSON.stringify(h.s.getState()).includes('private-secret'),false);
   assert.equal('balance' in h.s.getState(),false);
+});
+test('valid evidence prevents repeated token and network requests; expiry permits a new manual request',async()=>{
+  let tokens=0;
+  const h=setup();
+  h.s.setUser({getIdToken:async()=>{tokens++;return 'private-token';}});
+  await h.s.refresh();
+  for(let i=0;i<5;i++) await h.s.refresh();
+  assert.equal(tokens,1);assert.equal(h.calls.length,1);assert.equal(h.s.getState().verified,true);
+  h.setTime(START+30000);await h.s.refresh();
+  assert.equal(tokens,2);assert.equal(h.calls.length,2);
+  // The mock server's old timestamp cannot be reused after expiry.
+  assert.equal(h.s.getState().phase,'invalid_result');
+});
+test('a permitted five-second server clock lead cannot extend local freshness beyond thirty seconds',async()=>{
+  const h=setup({fetcher:async()=>({ok:true,json:async()=>payload(START+5000)})});
+  h.s.setUser(h.user);await h.s.refresh();
+  assert.equal(h.s.getState().expiresAt,START+30000);
+  h.setTime(START+30000);
+  [...h.timers.values()].find(t=>t.ms===30000).fn();
+  assert.equal(h.s.getState().phase,'expired');assert.equal(h.s.getState().verified,false);
 });
