@@ -25,4 +25,4 @@ The existing `backend/app.py` is a **prototype** with SQLite and a background po
 - Cloud Scheduler's cadence is not an exchange-native stop-loss. Simulated fills can be delayed, skipped during outages, or gap through stops.
 - This plan is **paper trading only**. It cannot place real OKX orders.
 - The current cloud connection panel is for the older shared-token prototype; it must be replaced by Firebase Authentication before production exposure.
-- No Firebase project has been selected, configured, or deployed from this repository yet.
+- Project `sinka-quant` now has an Artifact Registry image and a one-shot demo-only read-only Cloud Run Job. Its first connection test passed on 2026-10-17 (Asia/Taipei). The paper API, continuous account synchronization and scheduler are not verified as deployed. See [deployment status](DEPLOYMENT_STATUS.md).
