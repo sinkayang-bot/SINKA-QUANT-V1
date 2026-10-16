@@ -70,4 +70,5 @@ def test_worker_persists_verified_terminal_fill():
     assert asyncio.run(poll_once(reader=Reader(), ledger=ledger,
                                  lease=Lease(), journal=journal))
     assert journal.saved == [("worker-1", filled)]
-    assert ledger.written.healthy
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "transition_requires_fresh_poll"
