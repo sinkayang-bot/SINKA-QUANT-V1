@@ -26,6 +26,8 @@ async def audit_fill_window(*, reader, store, worker_id, tracked_orders):
             store.append_verified_window, worker_id, window)
         if not ok:
             return False, reason
+        if overlap.unseen:
+            return False, "new_fills_require_fresh_poll"
         return True, "fill_overlap_audited"
     except Exception:
         # Avoid exposing response bodies, credentials or Firestore metadata.
