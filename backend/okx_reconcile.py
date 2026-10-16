@@ -5,12 +5,12 @@ Pure validation: does not submit, amend or cancel exchange orders.
 from decimal import Decimal, InvalidOperation
 from okx_risk import SYMBOLS
 
-def number(value):
+def number(value, *, allow_negative=False):
     try:
         x = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise ValueError("Invalid position quantity") from exc
-    if not x.is_finite() or x < 0:
+    if not x.is_finite() or (x < 0 and not allow_negative):
         raise ValueError("Invalid position quantity")
     return x
 
@@ -22,7 +22,7 @@ def reconcile_positions(local, exchange_rows):
     for row in exchange_rows:
         if not isinstance(row, dict):
             raise ValueError("Invalid exchange position")
-        qty = number(row.get("pos"))
+        qty = number(row.get("pos"), allow_negative=True)
         if qty == 0:
             continue
         if row.get("instId") not in SYMBOLS or row.get("mgnMode") != "isolated":
@@ -43,10 +43,14 @@ def reconcile_positions(local, exchange_rows):
         return {"ready": False, "reason": "instrument_mismatch"}
     local_side = local.get("side")
     remote_side = remote.get("posSide")
-    signed = Decimal(str(remote["pos"]))
+    signed = number(remote["pos"], allow_negative=True)
     if remote_side == "long":
+        if signed <= 0:
+            return {"ready": False, "reason": "invalid_position_sign"}
         side = 1
     elif remote_side == "short":
+        if signed == 0:
+            return {"ready": False, "reason": "invalid_position_sign"}
         side = -1
     elif remote_side == "net":
         side = 1 if signed > 0 else -1
