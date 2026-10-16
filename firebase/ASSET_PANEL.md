@@ -1,0 +1,72 @@
+# Owner-only demo asset panel
+
+Implementation pending deployment verification. The accepted status-only service
+remains usable until the new image is deployed. An old image returns 404 for the
+new route; the UI explains that a backend update is pending.
+
+## Contract and boundaries
+
+`GET /api/okx/assets` uses the same Firebase owner UID and revoked-token check as
+the status endpoint. It requires `SINKA_OKX_ASSETS_API=true` in addition to the
+existing demo/read-only flags. Missing login, a different UID, or a revoked token
+must stop before constructing the OKX client. No request accepts OKX credentials.
+
+Each manual snapshot first requires API permission exactly `read_only`, then
+reads trading-account balances, SWAP positions and bounded pending-order pages.
+The status and asset endpoints share one in-process scan lock and a 30-second
+scan timeout. There are no writes, order/cancel routes, workers or schedules.
+
+The response has schema version 1, `mode=demo_readonly`, `trading_enabled=false`,
+`api_permissions_readonly=true`, `okx_connection_verified=true`, `atomic=false`,
+completion/expiry timestamps, and the following allowlisted data:
+
+- `summary.total_equity_usd`: trading-account total equity in USD.
+- `currencies`: currency, equity, cash/available balances, unrealized PnL, each
+  amount in that currency. Blank/missing optional values become null, never zero.
+- `positions`: instrument, position side, margin mode, contract count, average
+  and mark prices in USDT, unrealized PnL and its currency, optional USD notional.
+- `pending_orders`: instrument, buy/sell, position side, active state, requested
+  and filled contract counts, optional price in USDT. No order/client IDs.
+
+Scope is the trading account and the five monitored USDT perpetual contracts
+(BTC, ETH, SOL, XRP, DOGE); it excludes the funding account and algo/conditional
+orders. Nonzero positions or active standard orders outside the supported five
+instruments cause an unavailable result rather than silently hiding exposure.
+The UI says "未完成委託" for standard pending orders; this does not claim to list
+all exchange-side conditional/algorithmic instructions.
+
+The reads occur sequentially. The completion timestamp is a query timestamp,
+not proof that all exchange fields describe exactly the same instant.
+Quantities remain decimal strings; no floating-point rounding is used to
+compare requested and filled quantities. Unknown fields, credentials, account
+IDs, position IDs and order IDs are not returned to the browser.
+
+Both endpoints have strict GET CORS and `Cache-Control: no-store, private`.
+Private amounts live only in the authenticated page's memory and DOM. Starting
+a query, failure, expiry, logout, account change or page unload removes them.
+No localStorage, Firestore persistence, diagnostics export or telemetry receives
+asset amounts. Diagnostic copying includes only fixed states and timestamps.
+
+## Deployment
+
+The existing authorized script builds the new isolated image and enables the
+asset flag without changing instance limits or adding resources:
+
+```sh
+bash firebase/deploy-okx-status.sh --approved OWNER_FIREBASE_UID
+```
+
+It checks the public health capability and missing/invalid token denials on
+both GET routes, without making an authenticated OKX request or printing amounts.
+After deployment, the owner signs in and manually presses
+"更新模擬帳戶資產". Verify a fresh result, units, empty-state messages, clearing
+after 30 seconds, and clearing on logout. No private amounts need to be shared
+in chat; the fixed diagnostic snapshot is enough for transport/auth failures.
+
+The service remains min=0/max=1, one CPU, 512 MiB, concurrency 4. Retained images,
+builds and request processing can incur charges. No extra IAM role is needed
+beyond the existing three secret bindings and Firebase revoked-session reader.
+
+Sources: [OKX API v5](https://www.okx.com/docs-v5/en/) account balance, account
+positions and standard pending-order definitions. USD total equity must not be
+labeled USDT; SWAP size/fill fields are contracts, not coin quantities.

@@ -46,7 +46,7 @@ for secret in OKX_API_KEY OKX_API_SECRET OKX_API_PASSPHRASE; do
     --role=roles/secretmanager.secretAccessor --condition=None --quiet >/dev/null
 done
 cp "$root/backend/Dockerfile.okx-status" "$ctx/Dockerfile"
-for file in firebase_auth.py okx_readonly.py okx_orders.py okx_pending_orders.py okx_smoke.py okx_status_app.py; do
+for file in firebase_auth.py okx_readonly.py okx_orders.py okx_pending_orders.py okx_smoke.py okx_assets.py okx_status_app.py; do
   cp "$root/backend/$file" "$ctx/"
 done
 image="${region}-docker.pkg.dev/${project}/${repository}/okx-status:readonly"
@@ -56,7 +56,7 @@ digest="$(gcloud builds submit "$ctx" --project "$project" --region "$region" --
 image="${image%:*}@${digest}"
 gcloud run deploy "$service" --project "$project" --region "$region" --image "$image" \
   --service-account "$sa" --set-secrets="${secret_refs%,}" \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$project,SINKA_OWNER_UID=$owner_uid,SINKA_OKX_DEMO=true,SINKA_OKX_READONLY_API=true" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$project,SINKA_OWNER_UID=$owner_uid,SINKA_OKX_DEMO=true,SINKA_OKX_READONLY_API=true,SINKA_OKX_ASSETS_API=true" \
   --cpu=1 --memory=512Mi --min-instances=0 --max-instances=1 --concurrency=4 \
   --timeout=60s --cpu-throttling --no-cpu-boost --ingress=all --allow-unauthenticated --quiet
 url="$(gcloud run services describe "$service" --project "$project" --region "$region" --format='value(status.url)')"
@@ -72,12 +72,15 @@ opener=urllib.request.build_opener(NoRedirect)
 with opener.open(url+'/health',timeout=90) as r:
     health=json.load(r)
 assert health.get('status')=='ok' and health.get('trading_enabled') is False and health.get('okx_connection_verified') is False
-for headers in ({},{'Authorization':'Bearer invalid-deployment-probe'}):
-    try:
-        opener.open(urllib.request.Request(url+'/api/okx/status',headers=headers),timeout=90)
-        raise RuntimeError('Unauthenticated diagnostics unexpectedly accessible')
-    except urllib.error.HTTPError as e:
-        assert e.code==401, 'Authentication probe did not return 401'
+assert health.get('assets_readonly_enabled') is True
+for path in ('/api/okx/status','/api/okx/assets'):
+    for headers in ({},{'Authorization':'Bearer invalid-deployment-probe'}):
+        try:
+            opener.open(urllib.request.Request(url+path,headers=headers),timeout=90)
+            raise RuntimeError('Unauthenticated diagnostics unexpectedly accessible')
+        except urllib.error.HTTPError as e:
+            assert e.code==401, 'Authentication probe did not return 401'
 print(json.dumps({'service_url':url,'image':image,'public_health_verified':True,'missing_token_denied':True,
-                  'invalid_token_denied':True,'okx_connection_verified':False,'trading_enabled':False}))
+                  'invalid_token_denied':True,'assets_readonly_enabled':True,'asset_token_probes_denied':True,
+                  'okx_connection_verified':False,'trading_enabled':False}))
 PY

@@ -155,3 +155,45 @@ def test_concurrent_requests_do_not_duplicate_exchange_scan(monkeypatch):
             assert (await first).status_code == 200
     asyncio.run(exercise())
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("token,code", [(None,401),("other-token",403),("expired",401)])
+def test_assets_are_owner_only_before_exchange_access(monkeypatch, token, code):
+    client = setup(monkeypatch)
+    monkeypatch.setenv("SINKA_OKX_ASSETS_API", "true")
+    monkeypatch.setattr(status_api, "OKXReadOnly", lambda **k: pytest.fail("Must not call OKX"))
+    response = client.get("/api/okx/assets",headers={"Authorization":"Bearer "+token} if token else {})
+    assert response.status_code == code
+    assert response.headers["cache-control"] == "no-store, private"
+
+
+def test_assets_optin_is_required_and_does_not_change_status_probe(monkeypatch):
+    client = setup(monkeypatch)
+    monkeypatch.delenv("SINKA_OKX_ASSETS_API",raising=False)
+    monkeypatch.setattr(status_api, "OKXReadOnly", lambda **k: pytest.fail("Must not call OKX"))
+    assert client.get("/api/okx/assets",headers={"Authorization":"Bearer owner-token"}).status_code == 503
+    assert client.get("/health").json()["assets_readonly_enabled"] is False
+
+
+def test_assets_success_is_non_atomic_demo_snapshot_with_no_public_asset_response(monkeypatch):
+    client = setup(monkeypatch)
+    monkeypatch.setenv("SINKA_OKX_ASSETS_API", "true")
+    monkeypatch.setattr(status_api,"OKXReadOnly",lambda **k: object())
+    async def snapshot(reader): return {"summary":{"total_equity_usd":"123.45"},"currencies":[],"positions":[],"pending_orders":[]}
+    monkeypatch.setattr(status_api,"inspect_assets",snapshot)
+    response=client.get("/api/okx/assets",headers={"Authorization":"Bearer owner-token"})
+    assert response.status_code == 200
+    result=response.json()
+    assert result["schema_version"] == 1 and result["atomic"] is False and result["trading_enabled"] is False
+    assert result["summary"]["total_equity_usd"] == "123.45"
+    assert "123.45" not in client.get("/health").text
+    assert (datetime.fromisoformat(result["valid_until"])-datetime.fromisoformat(result["checked_at"])).total_seconds()==30
+
+
+def test_asset_failure_never_exposes_raw_payload_or_success_timestamp(monkeypatch):
+    client=setup(monkeypatch);monkeypatch.setenv("SINKA_OKX_ASSETS_API","true")
+    monkeypatch.setattr(status_api,"OKXReadOnly",lambda **k: object())
+    async def failed(reader): raise ValueError("PRIVATE_BALANCE PRIVATE_KEY")
+    monkeypatch.setattr(status_api,"inspect_assets",failed)
+    response=client.get("/api/okx/assets",headers={"Authorization":"Bearer owner-token"})
+    assert response.status_code==503 and "PRIVATE" not in response.text and "checked_at" not in response.text

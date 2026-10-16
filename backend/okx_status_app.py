@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from firebase_auth import verify_owner_token
 from okx_readonly import OKXReadOnly
 from okx_smoke import inspect_demo
+from okx_assets import inspect_assets
 
 CHECK_TIMEOUT_SECONDS = 30
 FRESH_SECONDS = 30
@@ -41,7 +42,30 @@ def create_app():
     def health():
         # Process liveness only. Never claims the exchange was checked.
         return {"status": "ok", "mode": "demo_readonly", "trading_enabled": False,
-                "okx_connection_verified": False}
+                "okx_connection_verified": False,
+                "assets_readonly_enabled": os.getenv("SINKA_OKX_ASSETS_API") == "true"}
+
+    @app.get("/api/okx/assets")
+    async def assets(owner: str = Depends(verify_owner_token)):
+        if any(os.getenv(flag) != "true" for flag in
+               ("SINKA_OKX_DEMO", "SINKA_OKX_READONLY_API", "SINKA_OKX_ASSETS_API")):
+            raise HTTPException(503, "Demo read-only asset API is disabled")
+        if check_lock.locked():
+            raise HTTPException(429, "A read-only check is already running", headers={"Retry-After": "5"})
+        async with check_lock:
+            try:
+                result = await asyncio.wait_for(inspect_assets(OKXReadOnly(demo=True)),
+                                                timeout=CHECK_TIMEOUT_SECONDS)
+            except TimeoutError:
+                raise HTTPException(504, "Read-only asset snapshot timed out") from None
+            except Exception:
+                raise HTTPException(503, "Read-only asset snapshot unavailable") from None
+        checked = datetime.now(timezone.utc)
+        return {"schema_version": 1, "mode": "demo_readonly", "trading_enabled": False,
+                "api_permissions_readonly": True, "okx_connection_verified": True,
+                "scope": "trading_account_and_five_monitored_swaps", "atomic": False,
+                "checked_at": checked.isoformat(),
+                "valid_until": (checked + timedelta(seconds=FRESH_SECONDS)).isoformat(), **result}
 
     @app.get("/api/okx/status")
     async def status(owner: str = Depends(verify_owner_token)):

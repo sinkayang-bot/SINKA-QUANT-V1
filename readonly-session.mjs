@@ -1,20 +1,27 @@
 const CHECKS = ['account_config', 'balances', 'positions', 'instruments', 'pending_orders'];
 
-export function statusEndpoint(base) {
+export function statusEndpoint(base, resource = 'status') {
+  if (!['status', 'assets'].includes(resource)) throw new Error('Unknown read-only resource');
   if (!base) return null;
   const url = new URL(base);
   if (url.protocol !== 'https:' || !url.hostname.endsWith('.run.app') || url.port ||
       url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
     throw new Error('Invalid status service origin');
   }
-  return url.origin + '/api/okx/status';
+  return url.origin + '/api/okx/' + resource;
 }
 
 export function verifiedResult(data, now) {
   if (!data || data.mode !== 'demo_readonly' || data.okx_connection_verified !== true ||
       data.api_permissions_readonly !== true || data.trading_enabled !== false ||
       !data.checks || Object.keys(data.checks).length !== CHECKS.length ||
-      !CHECKS.every(key => data.checks[key] === true) ||
+      !CHECKS.every(key => data.checks[key] === true)) return null;
+  return freshnessEvidence(data, now);
+}
+
+export function freshnessEvidence(data, now) {
+  if (!data || data.mode !== 'demo_readonly' || data.okx_connection_verified !== true ||
+      data.api_permissions_readonly !== true || data.trading_enabled !== false ||
       typeof data.checked_at !== 'string' || typeof data.valid_until !== 'string') return null;
   const checked = Date.parse(data.checked_at), until = Date.parse(data.valid_until);
   if (!Number.isFinite(checked) || !Number.isFinite(until) || checked > now + 5000 ||
@@ -25,8 +32,9 @@ export function verifiedResult(data, now) {
 }
 
 export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
-    now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout}) {
-  const endpoint = statusEndpoint(baseUrl);
+    now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
+    resource = 'status', resultValidator = verifiedResult}) {
+  const endpoint = statusEndpoint(baseUrl, resource);
   let user = null, generation = 0, pending = null, expiryTimer = null;
   let state = {phase: 'signed_out', verified: false};
   const publish = (phase, extra = {}) => {
@@ -79,7 +87,7 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
       const data = await Promise.race([response.json(), deadline]);
       if (version !== generation || controller.signal.aborted) return;
       failureStage = 'validation';
-      const clean = verifiedResult(data, now());
+      const clean = resultValidator(data, now());
       if (!clean) { publish('invalid_result', {failureStage, httpStatus}); return; }
       publish('verified', clean);
       expiryTimer = setTimer(() => { if (version === generation) checkExpiry(); }, Math.min(30000, clean.expiresAt - now()));
