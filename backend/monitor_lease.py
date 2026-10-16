@@ -15,8 +15,9 @@ class MonitorLease:
         self.db = ledger.db
         self.worker_id = worker_id or uuid.uuid4().hex
 
+    @staticmethod
     @firestore.transactional
-    def _acquire(self, transaction, now):
+    def _acquire(transaction, self, now):
         snapshot = self.ref.get(transaction=transaction)
         state = snapshot.to_dict() if snapshot.exists else {}
         current = state.get("worker_id")
@@ -31,16 +32,17 @@ class MonitorLease:
         return True
 
     def acquire(self):
-        return self._acquire(self.db.transaction(), time.time())
+        return self._acquire(self.db.transaction(), self, time.time())
 
+    @staticmethod
     @firestore.transactional
-    def _release(self, transaction):
+    def _release(transaction, self):
         snapshot = self.ref.get(transaction=transaction)
         if snapshot.exists and snapshot.to_dict().get("worker_id") == self.worker_id:
             transaction.delete(self.ref)
 
     def release(self):
-        self._release(self.db.transaction())
+        self._release(self.db.transaction(), self)
 
     def is_owner(self):
         snapshot = self.ref.get()
