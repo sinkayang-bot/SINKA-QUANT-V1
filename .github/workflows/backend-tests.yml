@@ -28,7 +28,7 @@ jobs:
       - run: python -m compileall -q app.py firebase_auth.py firestore_ledger.py firestore_app.py firestore_monitor.py monitor_lease.py okx_readonly.py okx_risk.py okx_orders.py okx_instruments.py okx_order_reader.py okx_reconcile.py okx_admission.py okx_sync.py okx_sync_gate.py okx_sync_store.py okx_firestore_sync.py okx_sync_lease.py okx_readonly_worker.py okx_pending_orders.py okx_order_journal.py okx_position_journal.py okx_fills.py okx_fill_position.py okx_fill_checkpoint.py okx_fill_watermark_store.py okx_fill_audit.py okx_smoke.py
       - run: python -m py_compile leased_monitor.py
       - name: Run backend unit tests
-        run: pytest -q tests --junitxml=pytest-unit.xml
+        run: python -m pytest -q tests --junitxml=pytest-unit.xml
       - name: Upload unit test report
         if: always()
         uses: actions/upload-artifact@v4
