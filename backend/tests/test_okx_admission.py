@@ -15,7 +15,8 @@ BASE = dict(local_position=None, exchange_positions=[],
             equity_usdt="10000", leverage=2,
             monitor_healthy=True, orders_synced=True,
             kill_switch=False, demo_verified=True,
-            sync_status=SYNC, current_session_verified=True)
+            sync_status=SYNC, current_session_verified=True,
+            pending_order_count=0)
 
 def check(**changes):
     return evaluate(**(BASE | changes))
@@ -33,6 +34,9 @@ def test_demo_admission_only():
     ({"demo_verified": False}, "demo_not_verified"),
     ({"exchange_positions": [{"instId": "BTC-USDT-SWAP", "mgnMode": "isolated", "posSide": "long", "pos": "1"}]}, "exchange_position_not_tracked"),
     ({"leverage": 5}, "risk_check_failed"),
+    ({"pending_order_count": 1}, "pending_orders_exist"),
+    ({"pending_order_count": None}, "pending_order_count_unverified"),
+    ({"pending_order_count": True}, "pending_order_count_unverified"),
 ])
 def test_gate_denies_unsafe_requests(change, reason):
     assert check(**change).reason == reason
