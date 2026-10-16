@@ -29,15 +29,17 @@ class PaperLedger:
             return {"cash": INITIAL, "position": None, "version": 0}
         return snapshot.to_dict()
 
+    @staticmethod
     @firestore.transactional
-    def _initialize(self, transaction):
+    def _initialize(transaction, self):
         return self._ensure(transaction)
 
     def initialize(self):
-        return self._initialize(self.db.transaction())
+        return self._initialize(self.db.transaction(), self)
 
+    @staticmethod
     @firestore.transactional
-    def _open(self, transaction, symbol, side, entry, stop, key):
+    def _open(transaction, self, symbol, side, entry, stop, key):
         request_ref = self.account.collection("requests").document(key)
         request_used = request_ref.get(transaction=transaction).exists
         account_snapshot = self.account.get(transaction=transaction)
@@ -73,10 +75,11 @@ class PaperLedger:
         if not all(math.isfinite(x) and x > 0 for x in (observed_price, stop)):
             raise ValueError("Invalid price")
         entry = observed_price * (1 + side * SLIP)
-        return self._open(self.db.transaction(), symbol, side, entry, stop, request_id)
+        return self._open(self.db.transaction(), self, symbol, side, entry, stop, request_id)
 
+    @staticmethod
     @firestore.transactional
-    def _close(self, transaction, observed_price, reason, expected_id, worker_id=None):
+    def _close(transaction, self, observed_price, reason, expected_id, worker_id=None):
         snapshot = self.account.get(transaction=transaction)
         if worker_id is not None:
             lease_ref = self.account.collection("runtime").document("lease")
@@ -108,7 +111,7 @@ class PaperLedger:
     def close(self, observed_price, reason, expected_id, worker_id=None):
         if not math.isfinite(observed_price) or observed_price <= 0:
             raise ValueError("Invalid price")
-        return self._close(self.db.transaction(), observed_price, reason, expected_id, worker_id)
+        return self._close(self.db.transaction(), self, observed_price, reason, expected_id, worker_id)
 
     def snapshot(self):
         snap = self.account.get()
