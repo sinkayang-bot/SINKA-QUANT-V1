@@ -37,6 +37,19 @@ jobs:
           path: backend/pytest-unit.xml
           if-no-files-found: warn
 
+  okx-worker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated OKX read-only worker
+        run: docker build -f backend/Dockerfile.okx-readonly -t sinka-okx-readonly:ci backend
+      - name: Verify worker cannot start without explicit opt-in
+        run: |
+          if docker run --rm sinka-okx-readonly:ci > /tmp/okx-start.out 2>&1; then
+            echo "Unsafe: worker started without opt-in"; exit 1
+          fi
+          grep -q "disabled by default" /tmp/okx-start.out
+
   firestore-emulator:
     runs-on: ubuntu-latest
     env:
