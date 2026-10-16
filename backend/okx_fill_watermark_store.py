@@ -44,8 +44,9 @@ class OKXFillWatermarkStore:
             raise ValueError("Corrupted fill watermark")
         return FillCheckpoint(anchor.trade_id, anchor)
 
+    @staticmethod
     @firestore.transactional
-    def _append(self, tx, worker_id, window, now):
+    def _append(tx, self, worker_id, window, now):
         lease_snap = self.lease_ref.get(transaction=tx)
         lease = lease_snap.to_dict() if lease_snap.exists else {}
         if not worker_id or lease.get("worker_id") != worker_id or float(lease.get("expires_at", 0)) <= now:
@@ -82,4 +83,4 @@ class OKXFillWatermarkStore:
         return True, "overlap_appended"
 
     def append_verified_window(self, worker_id, window):
-        return self._append(self.db.transaction(), worker_id, tuple(window), time.time())
+        return self._append(self.db.transaction(), self, worker_id, tuple(window), time.time())
