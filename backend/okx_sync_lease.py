@@ -14,8 +14,9 @@ class OKXSyncLease:
         self.ledger = ledger
         self.worker_id = worker_id or uuid.uuid4().hex
 
+    @staticmethod
     @firestore.transactional
-    def _acquire(self, tx, now):
+    def _acquire(tx, self, now):
         ref = self.ledger.lease_ref
         snap = ref.get(transaction=tx)
         previous = snap.to_dict() if snap.exists else {}
@@ -28,10 +29,11 @@ class OKXSyncLease:
         return True
 
     def acquire(self):
-        return self._acquire(self.ledger.db.transaction(), time.time())
+        return self._acquire(self.ledger.db.transaction(), self, time.time())
 
+    @staticmethod
     @firestore.transactional
-    def _release(self, tx):
+    def _release(tx, self):
         snap = self.ledger.lease_ref.get(transaction=tx)
         if snap.exists and snap.to_dict().get("worker_id") == self.worker_id:
             tx.delete(self.ledger.lease_ref)
@@ -39,4 +41,4 @@ class OKXSyncLease:
         return False
 
     def release(self):
-        return self._release(self.ledger.db.transaction())
+        return self._release(self.ledger.db.transaction(), self)
