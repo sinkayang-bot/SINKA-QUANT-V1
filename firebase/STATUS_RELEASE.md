@@ -46,3 +46,29 @@ not a claim that this automation browser can access the Cloud Run origin.
 
 Earlier candidate and login documents describe their respective implementation
 stages. This record supersedes their statements that no status service exists.
+
+## Accepted test baseline
+
+On **2026-10-17 05:04:52, Asia/Taipei**, the owner reported "全部通過" after
+testing release `a2cc5a1c19e1f61587922f50252d82fc60521e80` from the supplied link.
+This is owner-reported acceptance, separate from the earlier screenshot evidence.
+The release includes Google login, five GET-only demo checks, cleared expired
+evidence, safe diagnostic copying and suppression of duplicate queries while
+the result remains valid. Its frontend suite has 28 passing tests.
+
+Use this commit as the accepted frontend reference when investigating a later
+regression. It is not evidence of current exchange health or of a test of every
+older project feature. Deployment configuration and backend image remain the
+previously verified separate release.
+
+## Custom Pages deployment regression gate
+
+The custom `.github/workflows/pages.yml` deployment now runs login-module syntax
+validation and the full frontend Node test suite before uploading a Pages artifact.
+Failure stops that custom job before publication. These checks use mocked requests
+and never fetch credentials, call OKX, submit orders or create cloud resources.
+
+GitHub also exposes a separate built-in `pages build and deployment` run in this
+repository. This code change does not alter the repository's Pages source setting
+or claim to gate that separate deployment path. Repository-level publication
+policy needs a separate settings review before treating this as a universal gate.
