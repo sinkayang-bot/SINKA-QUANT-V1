@@ -17,8 +17,9 @@ class OKXSyncLedger:
         self.lease_ref = account.collection("runtime").document("sync_lease")
         self.status_ref = account.collection("runtime").document("sync_status")
 
+    @staticmethod
     @firestore.transactional
-    def _write(self, tx, worker_id, status, now):
+    def _write(tx, self, worker_id, status, now):
         lease_snap = self.lease_ref.get(transaction=tx)
         lease = lease_snap.to_dict() if lease_snap.exists else {}
         if (not worker_id or lease.get("worker_id") != worker_id
@@ -41,7 +42,7 @@ class OKXSyncLedger:
     def write(self, worker_id, status):
         if not isinstance(status, SyncStatus):
             raise ValueError("Invalid sync status")
-        return self._write(self.db.transaction(), worker_id, status, time.time())
+        return self._write(self.db.transaction(), self, worker_id, status, time.time())
 
     def read_diagnostic(self):
         snapshot = self.status_ref.get()
