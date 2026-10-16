@@ -43,3 +43,21 @@ def test_fenced_watermark_append_and_replay():
     assert store.append_verified_window(first.worker_id, [sample(4), sample(3)])[0] is False
     assert store.append_verified_window(next_worker.worker_id, [sample(4), sample(3)])[0]
     assert store.read_checkpoint().anchor_id == "4"
+
+def test_unreviewed_fill_watermark_cannot_be_used():
+    from google.cloud import firestore
+    from okx_firestore_sync import OKXSyncLedger
+    from okx_sync_lease import OKXSyncLease
+    from okx_fill_watermark_store import OKXFillWatermarkStore, encode_fill
+
+    db = firestore.Client(project="sinka-emulator")
+    ledger = OKXSyncLedger(db, "unreviewed-" + uuid.uuid4().hex)
+    store = OKXFillWatermarkStore(ledger)
+    lease = OKXSyncLease(ledger, "worker-review")
+    assert lease.acquire()
+    store.checkpoint_ref.create({"anchor_id": "1",
+                                 "anchor": encode_fill(sample(1))})
+    with pytest.raises(ValueError, match="Unreviewed"):
+        store.read_checkpoint()
+    assert store.append_verified_window(lease.worker_id, [sample(2), sample(1)]) == (
+        False, "baseline_review_required")
