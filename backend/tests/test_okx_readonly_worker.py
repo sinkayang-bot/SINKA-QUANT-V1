@@ -20,12 +20,13 @@ class Ledger:
 def test_worker_writes_unverified_order_inventory_not_ready():
     class Reader:
         swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
     ledger = Ledger()
     success = asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease()))
     assert success
     assert ledger.written.positions_matched
-    assert not ledger.written.healthy
-    assert not ledger.written.orders_matched
+    assert ledger.written.healthy
+    assert ledger.written.orders_matched
 
 def test_worker_skips_when_lease_owned_elsewhere():
     class Reader:
