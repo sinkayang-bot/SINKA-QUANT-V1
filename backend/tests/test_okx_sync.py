@@ -67,7 +67,7 @@ def test_verified_partial_fill_is_persisted():
     result = asyncio.run(sync_once(reader=obj, local_position=None,
                                    tracked_orders=[prior], persist_verified=persist))
     assert not result.healthy
-    assert result.reason == "transition_requires_fresh_poll"
+    assert result.reason == "filled_order_requires_position_reconciliation"
     persist.assert_awaited_once_with(partial)
 
 def test_rejected_journal_write_fails_closed():
@@ -139,3 +139,20 @@ def test_changed_pending_orders_during_poll_fail_closed():
     status = asyncio.run(sync_once(reader=Race(), local_position=None))
     assert not status.healthy
     assert status.reason == "orders_changed_during_sync"
+
+def test_old_filled_order_cannot_prove_flat_account_safe():
+    past = parse_order({"ordId": "712", "clOrdId": "sinka712",
+                        "instId": "BTC-USDT-SWAP", "state": "filled",
+                        "sz": "5", "accFillSz": "5"})
+    result = asyncio.run(sync_once(reader=reader(), local_position=None,
+                                   tracked_orders=[past]))
+    assert not result.healthy
+    assert result.reason == "filled_order_requires_position_reconciliation"
+
+def test_cancelled_without_fill_can_be_checked_when_flat():
+    canceled = parse_order({"ordId": "713", "clOrdId": "sinka713",
+                            "instId": "BTC-USDT-SWAP", "state": "canceled",
+                            "sz": "5", "accFillSz": "0"})
+    result = asyncio.run(sync_once(reader=reader(), local_position=None,
+                                   tracked_orders=[canceled]))
+    assert result.healthy
