@@ -16,7 +16,7 @@ class SyncStatus:
     orders_matched: bool
 
 async def sync_once(*, reader: OKXOrderReader, local_position,
-                    tracked_orders=()):
+                    tracked_orders=(), orders_inventory_verified=False):
     now = datetime.now(timezone.utc).isoformat()
     try:
         positions = await reader.swap_positions()
@@ -28,6 +28,8 @@ async def sync_once(*, reader: OKXOrderReader, local_position,
         for prior in tracked_orders:
             if prior.state not in ("filled", "canceled", "mmp_canceled"):
                 await reader.refresh(prior)
+        if not orders_inventory_verified:
+            return SyncStatus(False, "order_inventory_unverified", now, True, False)
         return SyncStatus(True, "synced", now, True, True)
     except Exception:
         # No credentials or response bodies in errors returned to callers.
