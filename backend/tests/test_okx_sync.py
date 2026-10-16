@@ -10,11 +10,14 @@ def reader(positions=None, fail=False):
             if fail:
                 raise ConnectionError("network unavailable")
             return [] if positions is None else positions
-        refresh = AsyncMock()
+        refresh = AsyncMock(side_effect=lambda order: order)
+        async def get(self, path, params):
+            assert path == '/api/v5/trade/orders-pending'
+            return []
     return Fake()
 
 def test_flat_synced():
-    status = asyncio.run(sync_once(reader=reader(), local_position=None, orders_inventory_verified=True))
+    status = asyncio.run(sync_once(reader=reader(), local_position=None))
     assert status.healthy and status.positions_matched and status.orders_matched
 
 def test_unknown_position_blocks():
@@ -36,13 +39,12 @@ def test_active_orders_refreshed():
     obj = reader()
     status = asyncio.run(sync_once(reader=obj, local_position=None,
                                    tracked_orders=[prior], orders_inventory_verified=True))
-    assert status.healthy
+    assert not status.healthy
+    assert status.reason == 'pending_order_mismatch'
     obj.refresh.assert_awaited_once_with(prior)
 
 
-def test_missing_order_inventory_never_reports_ready():
+def test_empty_verified_inventory_is_healthy():
     status = asyncio.run(sync_once(reader=reader(), local_position=None))
-    assert not status.healthy
-    assert status.positions_matched
-    assert not status.orders_matched
-    assert status.reason == "order_inventory_unverified"
+    assert status.healthy
+    assert status.positions_matched and status.orders_matched
