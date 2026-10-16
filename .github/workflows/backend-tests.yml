@@ -94,3 +94,14 @@ jobs:
           name: firestore-emulator-test-results
           path: backend/pytest-firestore.xml
           if-no-files-found: warn
+
+  okx-status-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated Firebase-protected status API
+        run: docker build -f backend/Dockerfile.okx-status -t sinka-okx-status:ci backend
+      - name: Import API without credentials or network
+        run: >-
+          docker run --rm --network none --entrypoint python sinka-okx-status:ci
+          -c "import okx_status_app; assert okx_status_app.app.openapi_url is None; print('Isolated status API imported without credentials')"
