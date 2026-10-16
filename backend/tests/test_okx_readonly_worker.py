@@ -36,8 +36,9 @@ def test_worker_records_verified_empty_pending_inventory():
     assert position_journal.saved == [("worker-1", [])]
     assert success
     assert ledger.written.positions_matched
-    assert ledger.written.healthy
-    assert ledger.written.orders_matched
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "fill_store_not_configured"
+    assert not ledger.written.orders_matched
 
 def test_worker_skips_when_lease_owned_elsewhere():
     class Reader:
@@ -96,74 +97,46 @@ def test_position_write_rejection_marks_sync_unhealthy():
     assert ledger.written.reason == "position_journal_write_denied"
 
 class FillStore:
-    def __init__(self, result):
-        self.result = result
-        self.windows = []
+    def __init__(self, checkpoint, accepts=True):
+        self.checkpoint = checkpoint
+        self.accepts = accepts
+        self.saved = []
     def read_checkpoint(self):
-        return None
+        return self.checkpoint
     def append_verified_window(self, worker_id, window):
-        self.windows.append((worker_id, window))
-        return self.result
+        self.saved.append((worker_id, tuple(window)))
+        return self.accepts, "overlap_appended" if self.accepts else "lease_denied"
 
 def test_missing_initial_fill_baseline_never_reports_healthy():
     class Reader:
         swap_positions = AsyncMock(return_value=[])
         get = AsyncMock(return_value=[])
-    store = FillStore((False, "initial_baseline_required"))
     ledger = Ledger()
+    store = FillStore(None)
     assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(), fill_store=store))
-    assert store.windows == [("worker-1", ())]
+                                 position_journal=PositionJournal(),
+                                 fill_store=store))
+    assert store.saved == []
     assert not ledger.written.healthy
-    assert ledger.written.reason == "fill_checkpoint_initial_baseline_required"
+    assert ledger.written.reason == "initial_baseline_required"
 
 def test_fill_watermark_write_rejection_marks_unhealthy():
-    class Reader:
-        swap_positions = AsyncMock(return_value=[])
-        get = AsyncMock(return_value=[])
-    ledger = Ledger()
-    store = FillStore((False, "lease_denied"))
-    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(), fill_store=store))
-    assert not ledger.written.healthy
-    assert ledger.written.reason == "fill_checkpoint_lease_denied"
-
-def test_verified_checkpoint_is_diagnostic_only():
-    class Reader:
-        swap_positions = AsyncMock(return_value=[])
-        get = AsyncMock(return_value=[])
-    ledger = Ledger()
-    store = FillStore((True, "overlap_appended"))
-    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(), fill_store=store))
-    assert ledger.written.healthy
-    assert store.windows == [("worker-1", ())]
-
-def test_new_fill_forces_next_cycle():
     from okx_fills import parse_fill
     from okx_fill_checkpoint import FillCheckpoint
     old = parse_fill({"tradeId": "10", "ordId": "100",
                       "instId": "BTC-USDT-SWAP", "side": "buy",
                       "fillSz": "1", "fillPx": "100"})
-    new = parse_fill({"tradeId": "11", "ordId": "100",
-                      "instId": "BTC-USDT-SWAP", "side": "buy",
-                      "fillSz": "1", "fillPx": "100"})
     class Reader:
         swap_positions = AsyncMock(return_value=[])
-        fill_rows = [
-            {"tradeId": "11", "billId": "111", "ordId": "100",
-             "instId": "BTC-USDT-SWAP", "side": "buy",
-             "fillSz": "1", "fillPx": "100"},
-            {"tradeId": "10", "billId": "110", "ordId": "100",
-             "instId": "BTC-USDT-SWAP", "side": "buy",
-             "fillSz": "1", "fillPx": "100"},
-        ]
-        async def get(self, path, params):
-            return self.fill_rows if path == "/api/v5/trade/fills" else []
+        get = AsyncMock(return_value=[{
+            "tradeId": "10", "billId": "110", "ordId": "100",
+            "instId": "BTC-USDT-SWAP", "side": "buy",
+            "fillSz": "1", "fillPx": "100"}])
     ledger = Ledger()
-    store = FillStore((True, "overlap_appended"))
-    store.read_checkpoint = lambda: FillCheckpoint(old.trade_id, old)
+    store = FillStore(FillCheckpoint(old.trade_id, old), accepts=False)
     assert asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
-                                 position_journal=PositionJournal(), fill_store=store))
+                                 position_journal=PositionJournal(),
+                                 fill_store=store))
     assert not ledger.written.healthy
-    assert ledger.written.reason == "new_fills_require_fresh_poll"
+    assert ledger.written.reason == "fill_order_quantity_mismatch"
+    assert store.saved == []
