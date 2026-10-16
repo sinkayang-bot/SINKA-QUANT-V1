@@ -1,5 +1,6 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
 import {createStatusSession} from './readonly-session.mjs';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=diagnostics-1';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
@@ -17,7 +18,11 @@ const messages = {
   invalid_result: '結果未通過完整核對，目前無法確認連線。',
 };
 let auth, sdk, authBusy = false;
+const diagnosticOutput = $('owner-diagnostic-output'), diagnosticNotice = $('owner-diagnostic-notice');
+if ($('owner-version')) $('owner-version').textContent = '介面版本：' + FRONTEND_VERSION;
 const session = createStatusSession({baseUrl: STATUS_API_BASE_URL, onChange: state => {
+  if (diagnosticOutput) { diagnosticOutput.value = ''; diagnosticOutput.hidden = true; }
+  if (diagnosticNotice) diagnosticNotice.textContent = '';
   status.textContent = messages[state.phase] || messages.unavailable;
   status.className = state.verified ? 'note up' : 'note';
   // Only the complete validated response may mark any individual check passed.
@@ -67,6 +72,18 @@ logout.addEventListener('click', async () => {
   finally { authBusy = false; logout.disabled = false; }
 });
 refresh.addEventListener('click', () => session.refresh());
+$('owner-copy-diagnostic')?.addEventListener('click', async () => {
+  const snapshot = diagnosticSummary(session.getState(), {
+    signedIn: Boolean(auth?.currentUser), serviceConfigured: Boolean(STATUS_API_BASE_URL),
+  });
+  diagnosticOutput.value = snapshot; diagnosticOutput.hidden = false;
+  try {
+    await navigator.clipboard.writeText(snapshot);
+    diagnosticNotice.textContent = '診斷摘要已複製。這是複製當下的狀態快照。';
+  } catch {
+    diagnosticNotice.textContent = '瀏覽器未允許複製，請選取下方摘要手動複製。';
+  }
+});
 document.addEventListener('visibilitychange', () => session.checkExpiry());
 window.addEventListener('focus', () => session.checkExpiry());
 window.addEventListener('pagehide', () => session.setUser(null));

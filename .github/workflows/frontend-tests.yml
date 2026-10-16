@@ -15,4 +15,4 @@ jobs:
         with:
           node-version: '22'
       - run: node --check auth-web.mjs
-      - run: node --test tests/readonly-session.test.mjs
+      - run: node --test tests/*.test.mjs
