@@ -45,6 +45,10 @@ async def sync_once(*, reader: OKXOrderReader, local_position,
             for previous, current in changed:
                 if not await persist_verified(current):
                     return SyncStatus(False, "journal_write_denied", now, True, False)
+        if local_position is None and any(order.filled > 0 for order in refreshed):
+            # A fill can create exposure even if a position read is lagging.
+            # A separate verified position ledger is required before readiness.
+            return SyncStatus(False, "filled_order_requires_position_reconciliation", now, False, False)
         if changed:
             # Exchange position and order feeds can lag each other. Require a
             # separate complete poll after a transition, never advertise ready.
