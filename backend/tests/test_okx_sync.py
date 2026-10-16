@@ -38,7 +38,7 @@ def test_active_orders_refreshed():
                          "sz": "1", "accFillSz": "0"})
     obj = reader()
     status = asyncio.run(sync_once(reader=obj, local_position=None,
-                                   tracked_orders=[prior], orders_inventory_verified=True))
+                                   tracked_orders=[prior]))
     assert not status.healthy
     assert status.reason == 'pending_order_mismatch'
     obj.refresh.assert_awaited_once_with(prior)
