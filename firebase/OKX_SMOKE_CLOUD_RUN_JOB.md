@@ -75,3 +75,35 @@ python3 backend/okx_cloud_preflight.py --expected-image '審查過的完整映�
 參考：[Cloud Run Job YAML](https://docs.cloud.google.com/run/docs/reference/yaml/v1)、
 [Secret 參照](https://docs.cloud.google.com/run/docs/configuring/jobs/secrets)、
 [Cloud Build 結果](https://docs.cloud.google.com/build/docs/api/reference/rest/v1/projects.builds#Results)。
+
+## 核對已存在的單次測試結果（不執行 Job）
+
+完成一次經授權的唯讀測試後，使用其確切執行名稱及事先核對的映像 digest：
+
+```bash
+python3 backend/okx_smoke_report.py \
+  --execution 'sinka-okx-readonly-smoke-實際執行尾碼' \
+  --expected-image '審查過的完整映像@sha256:digest'
+```
+
+工具只執行 `gcloud run jobs executions describe` 與該專案、地區、Job、
+執行名稱篩選的 `gcloud logging read`。不建立或執行 Job、不讀 Secret 內容，
+也不直接連線 OKX。需具備執行紀錄及日誌讀取權限；不會自行新增 IAM 權限。
+
+必須同時符合下列條件，才輸出 `okx_connection_verified: true` 並回傳結束碼 0：
+
+- 執行名稱、所屬 Job 及執行當時的不可變容器設定符合預期。
+- 執行 Completed 為 True，成功一個任務，無失敗、取消、執行中或重試。
+- 同一次執行的日誌有且只有一個完整且成功的 `demo_readonly` 回報，四個
+  唯讀查詢皆為 `ok`，且 `trading_enabled` 明確為 false。
+
+此核對查詢最近 30 天、最多 100 筆日誌。若達到上限、日誌延遲尚未出現、
+回報重複或格式不明，一律視為尚未驗證，不會自動重跑測試。可稍後再次執行
+核對工具，避免因日誌延遲而重複執行雲端 Job。
+
+輸出僅含固定檢查名稱與布林結果，不重印原始日誌、帳戶金額、持倉、訂單、
+秘密或 API 錯誤內容。一次通過只證明那次模擬唯讀查詢成功；不代表後續連線、
+交易授權或其他對帳流程已完成。
+
+參考：[Execution 狀態](https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.executions)、
+[Cloud Run 日誌欄位](https://docs.cloud.google.com/run/docs/logging#log_entry_fields_for_jobs)。
