@@ -11,13 +11,15 @@ from google.cloud import firestore
 from okx_firestore_sync import OKXSyncLedger
 from okx_order_reader import OKXOrderReader
 from okx_order_journal import OKXOrderJournal
+from okx_position_journal import OKXPositionJournal
 from okx_sync import sync_once
 from okx_sync_lease import OKXSyncLease
 
 LOG = logging.getLogger("sinka.okx_readonly_worker")
 INTERVAL_SECONDS = 15
 
-async def poll_once(*, reader, ledger, lease, journal=None):
+async def poll_once(*, reader, ledger, lease, journal=None,
+                    position_journal=None):
     """One iteration; return False when another worker owns the lease."""
     if not await asyncio.to_thread(lease.acquire):
         return False
@@ -28,21 +30,30 @@ async def poll_once(*, reader, ledger, lease, journal=None):
             return False
         return await asyncio.to_thread(journal.refresh, lease.worker_id, order)
 
+    async def persist_positions(rows):
+        if position_journal is None:
+            return False
+        return await asyncio.to_thread(position_journal.write_snapshot,
+                                       lease.worker_id, rows)
+
     status = await sync_once(reader=reader, local_position=None,
                              tracked_orders=tracked,
-                             persist_verified=persist_verified)
+                             persist_verified=persist_verified,
+                             persist_positions=persist_positions)
     stored = await asyncio.to_thread(ledger.write, lease.worker_id, status)
     if not stored:
         LOG.warning("OKX sync lease lost; diagnostic update rejected")
     return stored
 
-async def run(*, reader, ledger, lease, journal=None, delay=INTERVAL_SECONDS):
+async def run(*, reader, ledger, lease, journal=None,
+              position_journal=None, delay=INTERVAL_SECONDS):
     """Keep polling; failures are not treated as a successful sync."""
     try:
         while True:
             try:
                 await poll_once(reader=reader, ledger=ledger, lease=lease,
-                                journal=journal)
+                                journal=journal,
+                                position_journal=position_journal)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -64,9 +75,10 @@ def main():
     ledger = OKXSyncLedger(firestore.Client(), owner_uid)
     lease = OKXSyncLease(ledger)
     journal = OKXOrderJournal(ledger)
+    position_journal = OKXPositionJournal(ledger)
     reader = OKXOrderReader(demo=True)
     asyncio.run(run(reader=reader, ledger=ledger, lease=lease,
-                    journal=journal))
+                    journal=journal, position_journal=position_journal))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
