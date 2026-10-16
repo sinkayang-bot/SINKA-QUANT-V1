@@ -28,3 +28,22 @@ def test_mismatches_lock_new_orders(local, remote, reason):
 def test_invalid_quantity_rejected():
     with pytest.raises(ValueError):
         reconcile_positions(None, [REMOTE | {"pos": "NaN"}])
+
+def test_net_mode_negative_position_is_valid_short():
+    local = {"symbol": "BTC-USDT-SWAP", "side": -1, "contracts": "2"}
+    row = {"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
+           "posSide": "net", "pos": "-2"}
+    assert reconcile_positions(local, [row]) == {"ready": True, "reason": "matched"}
+
+def test_untracked_negative_position_blocks_new_orders():
+    row = {"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
+           "posSide": "net", "pos": "-1"}
+    assert reconcile_positions(None, [row])["reason"] == "exchange_position_not_tracked"
+
+def test_negative_local_quantity_is_invalid():
+    row = {"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
+           "posSide": "net", "pos": "-2"}
+    import pytest
+    with pytest.raises(ValueError):
+        reconcile_positions({"symbol": "BTC-USDT-SWAP", "side": -1,
+                             "contracts": "-2"}, [row])
