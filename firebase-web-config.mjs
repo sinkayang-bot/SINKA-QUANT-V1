@@ -6,6 +6,6 @@ export const FIREBASE_CONFIG = Object.freeze({
   projectId: 'sinka-quant',
   appId: '1:361301529939:web:656723ad04a3c8075bfda6',
 });
-// Set only after reviewing and deploying the dedicated read-only Cloud Run API.
+// Dedicated read-only Cloud Run API deployed and denial probes verified.
 // No user-entered URL is accepted for sending Firebase bearer tokens.
-export const STATUS_API_BASE_URL = null;
+export const STATUS_API_BASE_URL = 'https://sinka-okx-readonly-status-361301529939.asia-east1.run.app';
