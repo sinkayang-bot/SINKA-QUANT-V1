@@ -17,12 +17,23 @@ class Ledger:
         self.written = status
         return self.accepts
 
+class PositionJournal:
+    def __init__(self, accepts=True):
+        self.accepts = accepts
+        self.saved = []
+    def write_snapshot(self, worker_id, positions):
+        self.saved.append((worker_id, positions))
+        return self.accepts
+
 def test_worker_records_verified_empty_pending_inventory():
     class Reader:
         swap_positions = AsyncMock(return_value=[])
         get = AsyncMock(return_value=[])
     ledger = Ledger()
-    success = asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease()))
+    position_journal = PositionJournal()
+    success = asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease(),
+                                    position_journal=position_journal))
+    assert position_journal.saved == [("worker-1", [])]
     assert success
     assert ledger.written.positions_matched
     assert ledger.written.healthy
@@ -72,3 +83,14 @@ def test_worker_persists_verified_terminal_fill():
     assert journal.saved == [("worker-1", filled)]
     assert not ledger.written.healthy
     assert ledger.written.reason == "filled_order_requires_position_reconciliation"
+
+def test_position_write_rejection_marks_sync_unhealthy():
+    class Reader:
+        swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
+    ledger = Ledger()
+    position_journal = PositionJournal(accepts=False)
+    assert asyncio.run(poll_once(reader=Reader(), ledger=ledger,
+                                 lease=Lease(), position_journal=position_journal))
+    assert not ledger.written.healthy
+    assert ledger.written.reason == "position_journal_write_denied"
