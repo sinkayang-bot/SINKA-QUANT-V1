@@ -20,6 +20,8 @@ def test_signed_net_short():
       "posSide": "long", "pos": "-1"}],
     [{"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
       "posSide": "net", "pos": "NaN"}],
+    [{"instId": "BTC-USDT-SWAP", "mgnMode": "isolated",
+      "posSide": "short", "pos": "-1"}],
 ])
 def test_reject_bad_snapshots(rows):
     with pytest.raises(ValueError):
