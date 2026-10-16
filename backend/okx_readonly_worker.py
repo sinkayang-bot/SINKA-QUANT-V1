@@ -20,10 +20,9 @@ async def poll_once(*, reader, ledger, lease):
     """One iteration; return False when another worker owns the lease."""
     if not await asyncio.to_thread(lease.acquire):
         return False
-    # Until durable exchange-order inventory is implemented, a flat account
-    # must still be classified as NOT verified for trading.
-    status = await sync_once(reader=reader, local_position=None,
-                             orders_inventory_verified=False)
+    # No durable local OKX order ledger yet: any exchange order is untracked.
+    # Matching a currently empty inventory does NOT enable trade submission.
+    status = await sync_once(reader=reader, local_position=None)
     stored = await asyncio.to_thread(ledger.write, lease.worker_id, status)
     if not stored:
         LOG.warning("OKX sync lease lost; diagnostic update rejected")
