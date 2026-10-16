@@ -43,8 +43,9 @@ class OKXOrderJournal:
         return bool(worker_id) and data.get("worker_id") == worker_id and (
             float(data.get("expires_at", 0)) > now)
 
+    @staticmethod
     @firestore.transactional
-    def _register(self, tx, worker_id, order, now):
+    def _register(tx, self, worker_id, order, now):
         if not self._owner(tx, worker_id, now):
             return False
         ref = self.orders.document(order.order_id)
@@ -57,10 +58,11 @@ class OKXOrderJournal:
     def register_existing(self, worker_id, order):
         """Explicit recovery import only; no automatic order adoption."""
         encode_order(order)
-        return self._register(self.db.transaction(), worker_id, order, time.time())
+        return self._register(self.db.transaction(), self, worker_id, order, time.time())
 
+    @staticmethod
     @firestore.transactional
-    def _refresh(self, tx, worker_id, order, now):
+    def _refresh(tx, self, worker_id, order, now):
         if not self._owner(tx, worker_id, now):
             return False
         ref = self.orders.document(order.order_id)
@@ -76,7 +78,7 @@ class OKXOrderJournal:
 
     def refresh(self, worker_id, order):
         encode_order(order)
-        return self._refresh(self.db.transaction(), worker_id, order, time.time())
+        return self._refresh(self.db.transaction(), self, worker_id, order, time.time())
 
     def list_tracked(self):
         """Fail closed when the bounded diagnostic journal grows too large."""
