@@ -17,7 +17,7 @@ class Ledger:
         self.written = status
         return self.accepts
 
-def test_worker_writes_unverified_order_inventory_not_ready():
+def test_worker_records_verified_empty_pending_inventory():
     class Reader:
         swap_positions = AsyncMock(return_value=[])
         get = AsyncMock(return_value=[])
@@ -41,5 +41,6 @@ def test_worker_skips_when_lease_owned_elsewhere():
 def test_fencing_rejects_stale_worker_write():
     class Reader:
         swap_positions = AsyncMock(return_value=[])
+        get = AsyncMock(return_value=[])
     ledger = Ledger(accepts=False)
     assert not asyncio.run(poll_once(reader=Reader(), ledger=ledger, lease=Lease()))
