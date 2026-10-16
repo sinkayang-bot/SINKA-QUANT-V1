@@ -48,3 +48,10 @@ def test_unsafe_inventory_fails_closed(pages):
 def test_pending_order_changed_state_fails_comparison():
     found = asyncio.run(pending_swap_inventory(Reader([[order(1)]])))
     assert not verify_pending_inventory(found, [parse_order(order(1) | {"state": "partially_filled"})])
+
+def test_reused_client_order_id_rejected():
+    first = order(100)
+    second = order(101)
+    second["clOrdId"] = first["clOrdId"]
+    with pytest.raises(ValueError, match="Repeated"):
+        asyncio.run(pending_swap_inventory(Reader([[first, second]])))
