@@ -48,3 +48,48 @@ def test_empty_verified_inventory_is_healthy():
     status = asyncio.run(sync_once(reader=reader(), local_position=None))
     assert status.healthy
     assert status.positions_matched and status.orders_matched
+
+def test_verified_partial_fill_is_persisted():
+    from okx_orders import parse_order
+    prior = parse_order({"ordId": "456", "clOrdId": "sinka456",
+                         "instId": "BTC-USDT-SWAP", "state": "live",
+                         "sz": "10", "accFillSz": "0"})
+    partial = parse_order({"ordId": "456", "clOrdId": "sinka456",
+                           "instId": "BTC-USDT-SWAP", "state": "partially_filled",
+                           "sz": "10", "accFillSz": "4"})
+    obj = reader()
+    obj.refresh = AsyncMock(return_value=partial)
+    obj.get = AsyncMock(return_value=[{"ordId": "456", "clOrdId": "sinka456",
+                                      "instId": "BTC-USDT-SWAP",
+                                      "state": "partially_filled", "sz": "10",
+                                      "accFillSz": "4"}])
+    persist = AsyncMock(return_value=True)
+    result = asyncio.run(sync_once(reader=obj, local_position=None,
+                                   tracked_orders=[prior], persist_verified=persist))
+    assert result.healthy
+    persist.assert_awaited_once_with(partial)
+
+def test_rejected_journal_write_fails_closed():
+    prior = parse_order({"ordId": "456", "clOrdId": "sinka456",
+                         "instId": "BTC-USDT-SWAP", "state": "live",
+                         "sz": "10", "accFillSz": "0"})
+    filled = parse_order({"ordId": "456", "clOrdId": "sinka456",
+                          "instId": "BTC-USDT-SWAP", "state": "filled",
+                          "sz": "10", "accFillSz": "10"})
+    obj = reader()
+    obj.refresh = AsyncMock(return_value=filled)
+    persist = AsyncMock(return_value=False)
+    result = asyncio.run(sync_once(reader=obj, local_position=None,
+                                   tracked_orders=[prior], persist_verified=persist))
+    assert not result.healthy and result.reason == "journal_write_denied"
+
+def test_pending_mismatch_never_persists():
+    prior = parse_order({"ordId": "123", "clOrdId": "sinka123",
+                         "instId": "BTC-USDT-SWAP", "state": "live",
+                         "sz": "10", "accFillSz": "0"})
+    obj = reader()
+    persist = AsyncMock(return_value=True)
+    result = asyncio.run(sync_once(reader=obj, local_position=None,
+                                   tracked_orders=[prior], persist_verified=persist))
+    assert not result.healthy
+    persist.assert_not_awaited()
