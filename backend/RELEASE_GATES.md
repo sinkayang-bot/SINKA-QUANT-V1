@@ -13,6 +13,9 @@
 - [x] OKX GET-only adapter、交易所持倉與未成交委託掃描。
 - [x] Firestore 訂單、持倉、成交水位和租約原型。
 - [x] opt-in 唯讀 API smoke check：`backend/okx_smoke.py`。
+- [x] 獨立唯讀連線測試容器：`backend/Dockerfile.okx-smoke`（不包含下單引擎）。
+- [x] GitHub Actions 增加手動觸發、容器建置及預設拒絕啟動檢查。
+- [ ] 尚待確認這些新增 CI 工作實際通過。
 - [ ] 在 GitHub Actions 驗證全套 Python 測試、Firestore emulator 測試通過。
 - [ ] 建立 Google Cloud / Firebase 專案、IAM、Secret Manager、受保護的服務環境。
 - [ ] 由使用者在 OKX 模擬帳戶建立**只讀** API Key；僅注入伺服器端 Secret Manager。
