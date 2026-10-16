@@ -14,7 +14,7 @@ def reader(positions=None, fail=False):
     return Fake()
 
 def test_flat_synced():
-    status = asyncio.run(sync_once(reader=reader(), local_position=None))
+    status = asyncio.run(sync_once(reader=reader(), local_position=None, orders_inventory_verified=True))
     assert status.healthy and status.positions_matched and status.orders_matched
 
 def test_unknown_position_blocks():
@@ -35,6 +35,14 @@ def test_active_orders_refreshed():
                          "sz": "1", "accFillSz": "0"})
     obj = reader()
     status = asyncio.run(sync_once(reader=obj, local_position=None,
-                                   tracked_orders=[prior]))
+                                   tracked_orders=[prior], orders_inventory_verified=True))
     assert status.healthy
     obj.refresh.assert_awaited_once_with(prior)
+
+
+def test_missing_order_inventory_never_reports_ready():
+    status = asyncio.run(sync_once(reader=reader(), local_position=None))
+    assert not status.healthy
+    assert status.positions_matched
+    assert not status.orders_matched
+    assert status.reason == "order_inventory_unverified"
