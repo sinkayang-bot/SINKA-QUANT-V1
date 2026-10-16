@@ -2,7 +2,7 @@ import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=
 import {createStatusSession} from './readonly-session.mjs?v=assets-1';
 import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=assets-1';
 import {createAssetsSession} from './readonly-assets.mjs?v=assets-1';
-import {renderAssets} from './assets-view.mjs?v=assets-1';
+import {renderAssets} from './assets-view.mjs?v=assets-2';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');

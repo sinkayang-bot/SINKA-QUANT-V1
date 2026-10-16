@@ -13,6 +13,13 @@ function table(id, rows) {
   }
 }
 export function renderAssets(state, messages) {
+  if ($('asset-connection-state')) {
+    $('asset-connection-state').textContent=state.verified?'本次已更新':state.httpStatus===404?'待後端更新':
+      state.phase==='signed_out'?'尚未登入':state.phase==='checking'?'正在讀取':state.phase==='expired'?'已過期':
+      state.phase==='signed_in'?'尚未查詢':'目前無法確認';
+    $('asset-connection-note').textContent=state.verified?'模擬帳戶資料見下方資產面板，最多 30 秒有效。':
+      '登入後可手動查詢；失敗、過期或登出時會清除資料。';
+  }
   $('asset-status').textContent = state.httpStatus === 404 ? '資產面板正在準備後端更新，請稍後再試。' :
     state.phase === 'verified' ? '本次模擬帳戶資產查詢通過，交易功能關閉。' :
     state.phase === 'signed_in' ? '已登入，按「更新模擬帳戶資產」讀取本次資料。' :
