@@ -13,7 +13,12 @@ SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-sinka-okx-readonly@${PROJECT_ID}.iam.gservic
 if [[ "${PROJECT_ID}" != "sinka-quant" ]]; then
   echo "BLOCKED: unexpected Google Cloud project" >&2; exit 1
 fi
-for command in gcloud git mktemp; do
+if [[ "$REGION" != "asia-east1" || "$REPOSITORY" != "sinka-okx-readonly" ||
+      "$JOB" != "sinka-okx-readonly-smoke" ||
+      "$SERVICE_ACCOUNT" != "sinka-okx-readonly@sinka-quant.iam.gserviceaccount.com" ]]; then
+  echo "BLOCKED: unexpected smoke deployment target" >&2; exit 1
+fi
+for command in gcloud git mktemp python3; do
   command -v "$command" >/dev/null || { echo "Missing: $command" >&2; exit 1; }
 done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,10 +31,9 @@ read -r -p "Type DEPLOY to proceed: " confirmation
 [[ "$confirmation" == "DEPLOY" ]] || { echo "Cancelled"; exit 0; }
 
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com --project "$PROJECT_ID"
-gcloud iam service-accounts describe "$SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
-for secret in OKX_API_KEY OKX_API_SECRET OKX_API_PASSPHRASE; do
-  gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null
-done
+# Metadata only: disabled accounts or missing/disabled latest secret versions
+# must stop deployment BEFORE repository creation or a billable image build.
+python3 "$ROOT/backend/okx_cloud_preflight.py" --before-build
 if ! gcloud artifacts repositories describe "$REPOSITORY" --project "$PROJECT_ID" --location "$REGION" >/dev/null 2>&1; then
   gcloud artifacts repositories create "$REPOSITORY" --project "$PROJECT_ID" --location "$REGION" \
     --repository-format=docker --description="SINKA QUANT demo-only read-only diagnostics"

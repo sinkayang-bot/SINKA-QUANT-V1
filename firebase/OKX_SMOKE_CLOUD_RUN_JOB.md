@@ -107,3 +107,23 @@ python3 backend/okx_smoke_report.py \
 
 參考：[Execution 狀態](https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.executions)、
 [Cloud Run 日誌欄位](https://docs.cloud.google.com/run/docs/logging#log_entry_fields_for_jobs)。
+
+## 建置前檢查與固定部署目標
+
+```bash
+python3 backend/okx_cloud_preflight.py --before-build
+```
+
+`--before-build` 只要求必要 API、啟用的專用服務帳戶及三組啟用的 latest Secret
+版本都能讀取 metadata；首次部署尚未建立 repository / Job 時仍可通過此階段。
+輸出的 `before_build_ready` 與 `metadata_ready`、`job_configuration_verified`、
+`okx_connection_verified` 分開，避免把「可以開始建置」誤認為「部署或連線成功」。
+這個模式通過時結束碼為 0；未通過為 1。
+
+部署腳本在啟用必要 API 後、建立 repository 及付費建置之前自動執行此檢查。
+缺少權限、缺少 SDK、停用帳戶、停用或不存在的 latest Secret 都會停止流程。
+仍需另行驗證執行身分的實際 Secret 存取權限，metadata 通過不代表已有 Accessor。
+
+專案、地區、repository、Job、服務帳戶鎖定為本文件指定的值；環境變數若試圖
+改用其他目標，腳本會在任何雲端指令前拒絕。變更部署腳本也會觸發 GitHub
+後端測試，涵蓋「Secret 停用時不得建置」及「異常目標不得操作雲端」。

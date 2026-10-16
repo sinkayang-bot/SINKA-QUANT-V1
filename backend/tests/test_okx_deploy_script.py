@@ -16,6 +16,13 @@ with open(os.environ["SDK_TEST_LOG"], "a") as output:
     output.write(json.dumps(sys.argv[1:]) + "\\n")
 if sys.argv[1:3] == ["builds", "submit"]:
     print(os.environ["SDK_TEST_DIGEST"])
+elif sys.argv[1:3] == ["services", "list"]:
+    print(json.dumps([{"config": {"name": name + ".googleapis.com"}} for name in
+                     ("run", "artifactregistry", "cloudbuild", "secretmanager")]))
+elif sys.argv[1:4] == ["iam", "service-accounts", "describe"]:
+    print(json.dumps({"email": "sinka-okx-readonly@sinka-quant.iam.gserviceaccount.com"}))
+elif sys.argv[1:4] == ["secrets", "versions", "describe"]:
+    print(json.dumps({"state": os.getenv("SDK_TEST_SECRET_STATE", "ENABLED")}))
 ''')
     sdk.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
@@ -46,3 +53,20 @@ def test_missing_build_digest_blocks_job_deployment(tmp_path, monkeypatch):
     assert result.returncode != 0
     assert "missing build image digest" in result.stderr
     assert not any(call[:3] == ["run", "jobs", "deploy"] for call in calls)
+
+
+def test_disabled_secret_stops_before_any_billable_build(tmp_path, monkeypatch):
+    monkeypatch.setenv("SDK_TEST_SECRET_STATE", "DISABLED")
+    result, calls = run_deploy(tmp_path, monkeypatch, "sha256:" + "a" * 64)
+    assert result.returncode != 0
+    assert not any(call[:2] == ["builds", "submit"] for call in calls)
+    assert not any(call[:3] == ["artifacts", "repositories", "create"] for call in calls)
+    assert not any(call[:3] == ["run", "jobs", "deploy"] for call in calls)
+
+
+def test_unexpected_target_stops_before_cloud_commands(tmp_path, monkeypatch):
+    monkeypatch.setenv("REGION", "us-central1")
+    result = subprocess.run(["bash", str(SCRIPT)], input="DEPLOY\n",
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode != 0
+    assert "unexpected smoke deployment target" in result.stderr

@@ -62,9 +62,12 @@ def inspect_cloud(expected_image=None):
         "ok" if isinstance(job, dict) and isinstance(job.get("metadata"), dict)
         and job["metadata"].get("name") == JOB else "missing_or_denied"
     )
+    build_keys = ["required_apis", "service_account", *[name + "_version" for name in SECRETS]]
+    before_build_ready = all(checks[key] == "ok" for key in build_keys)
     job_checks = verify_job(job, expected_image)
     return {
         "job_configuration_checks": job_checks,
+        "before_build_ready": before_build_ready,
         "metadata_ready": all(value == "ok" for value in checks.values()),
         "project": PROJECT, "region": REGION, "checks": checks,
         "runtime_secret_access_verified": False,
@@ -77,10 +80,14 @@ def inspect_cloud(expected_image=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-image", help="Reviewed smoke image reference pinned by SHA256 digest")
+    parser.add_argument("--before-build", action="store_true",
+                        help="Check build prerequisites; repository and Job may not exist yet")
     args = parser.parse_args()
     result = inspect_cloud(args.expected_image)
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["metadata_ready"] and result["job_configuration_verified"] else 1
+    ready = (result["before_build_ready"] if args.before_build else
+             result["metadata_ready"] and result["job_configuration_verified"])
+    return 0 if ready else 1
 
 
 if __name__ == "__main__":

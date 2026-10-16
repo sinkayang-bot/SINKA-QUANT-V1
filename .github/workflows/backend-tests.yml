@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - 'backend/**'
+      - 'firebase/deploy-okx-smoke-job.sh'
       - '.github/workflows/backend-tests.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'firebase/deploy-okx-smoke-job.sh'
       - '.github/workflows/backend-tests.yml'
 permissions:
   contents: read

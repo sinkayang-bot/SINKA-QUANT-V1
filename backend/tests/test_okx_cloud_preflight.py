@@ -55,3 +55,37 @@ def test_missing_sdk_and_timeout_are_sanitized(monkeypatch):
             raise error
         monkeypatch.setattr(cloud.subprocess, "run", fail)
         assert cloud.metadata("services", "list") is None
+
+
+def test_before_build_can_pass_without_repository_or_job(monkeypatch, capsys):
+    def metadata(*args):
+        if args[:2] == ("services", "list"):
+            return [{"config": {"name": name}} for name in cloud.APIS]
+        if args[:3] == ("iam", "service-accounts", "describe"):
+            return {"email": cloud.SERVICE_ACCOUNT}
+        if args[:3] == ("secrets", "versions", "describe"):
+            return {"state": "ENABLED"}
+        return None
+    monkeypatch.setattr(cloud, "metadata", metadata)
+    monkeypatch.setattr("sys.argv", ["okx_cloud_preflight.py", "--before-build"])
+    assert cloud.main() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["before_build_ready"] is True
+    assert result["metadata_ready"] is False
+    assert result["job_configuration_verified"] is False
+    assert result["okx_connection_verified"] is False
+    monkeypatch.setattr("sys.argv", ["okx_cloud_preflight.py"])
+    assert cloud.main() == 1
+
+
+def test_disabled_account_blocks_build_readiness(monkeypatch):
+    def metadata(*args):
+        if args[:2] == ("services", "list"):
+            return [{"config": {"name": name}} for name in cloud.APIS]
+        if args[:3] == ("iam", "service-accounts", "describe"):
+            return {"email": cloud.SERVICE_ACCOUNT, "disabled": True}
+        if args[:3] == ("secrets", "versions", "describe"):
+            return {"state": "ENABLED"}
+        return None
+    monkeypatch.setattr(cloud, "metadata", metadata)
+    assert cloud.inspect_cloud()["before_build_ready"] is False
