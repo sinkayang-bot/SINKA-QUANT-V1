@@ -39,12 +39,12 @@ python3 backend/okx_cloud_preflight.py
 此工具固定使用 `sinka-quant` / `asia-east1`，只讀取必要 API、服務帳戶、
 三組 Secret 的 latest 版本狀態、Docker Standard repository 與 Job 是否存在。
 不讀取 Secret 內容、不修改 IAM、不建置、不部署，也不執行 Job。
-輸出 JSON，`metadata_ready: false` 時結束碼為 1；未登入、SDK 不存在或權限不足
+輸出 JSON，metadata 或 Job 設定未通過時結束碼為 1；未登入、SDK 不存在或權限不足
 皆視為未就緒，不會輸出原始錯誤或秘密內容。
 
 `metadata_ready: true` **只表示上述資源的 metadata 檢查通過**，不代表
 Job 的容器設定已核對、執行身分具備 Secret Accessor、OKX API 權限正確或連線成功。
-這些項目分別保留 `false`，需後續獨立驗證。
+Secret 存取及 OKX 連線仍需後續獨立驗證。
 
 ## 測試失敗診斷
 
@@ -52,3 +52,26 @@ Job 的容器設定已核對、執行身分具備 Secret Accessor、OKX API 權�
 `configuration`、`balances`、`positions`、`instruments` 或 `pending_orders`。
 任何查詢或資料驗證失敗，立即停止後續查詢；不顯示帳戶金額、持倉內容、
 訂單識別碼、API 回應本文或憑證。缺少憑證也只輸出固定診斷並以非零結束碼結束。
+
+## Job 設定核對（不執行）
+
+部署腳本會從該次 Cloud Build 結果取得 SHA256 digest，並用不可變的 digest
+部署映像，明確指定 `python okx_smoke.py`。取得不到合法 digest 時停止部署。
+完成後會顯示映像參照；先核對該建置來源與內容，再執行：
+
+```bash
+python3 backend/okx_cloud_preflight.py --expected-image '審查過的完整映像@sha256:digest'
+```
+
+設定核對要求指定 Job、地區、服務帳戶、單一容器、完全相同的映像 digest、
+固定入口、兩個模擬唯讀旗標、三個同名 Secret 的 latest 參照，以及單任務、
+零重試、120 秒、1 CPU / 512Mi。額外環境變數、重複變數、明文秘密、掛載
+或其他容器皆不通過。舊版 Job 需以新腳本重新部署才會符合明確入口的要求。
+
+只提供標籤或未提供 `--expected-image`，`job_configuration_verified` 會保留 false。
+此檢查只核對設定，不驗證映像來源、IAM 有效權限或 API 金鑰權限，亦不執行 Job。
+不支援的 API 格式或跨專案 Secret 別名會視為未通過，需另行審查。
+
+參考：[Cloud Run Job YAML](https://docs.cloud.google.com/run/docs/reference/yaml/v1)、
+[Secret 參照](https://docs.cloud.google.com/run/docs/configuring/jobs/secrets)、
+[Cloud Build 結果](https://docs.cloud.google.com/build/docs/api/reference/rest/v1/projects.builds#Results)。

@@ -1,6 +1,9 @@
 """Metadata-only deployment preflight. Never accesses secret payloads or runs jobs."""
+import argparse
 import json
 import subprocess
+
+from okx_job_config import verify_job
 
 PROJECT = "sinka-quant"
 REGION = "asia-east1"
@@ -26,7 +29,7 @@ def metadata(*args):
         return None
 
 
-def inspect_cloud():
+def inspect_cloud(expected_image=None):
     checks = {}
     apis = metadata("services", "list", "--enabled")
     if isinstance(apis, list):
@@ -59,20 +62,25 @@ def inspect_cloud():
         "ok" if isinstance(job, dict) and isinstance(job.get("metadata"), dict)
         and job["metadata"].get("name") == JOB else "missing_or_denied"
     )
+    job_checks = verify_job(job, expected_image)
     return {
+        "job_configuration_checks": job_checks,
         "metadata_ready": all(value == "ok" for value in checks.values()),
         "project": PROJECT, "region": REGION, "checks": checks,
         "runtime_secret_access_verified": False,
-        "job_configuration_verified": False,
+        "job_configuration_verified": all(job_checks.values()),
         "okx_connection_verified": False,
         "job_executed": False, "trading_enabled": False,
     }
 
 
 def main():
-    result = inspect_cloud()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-image", help="Reviewed smoke image reference pinned by SHA256 digest")
+    args = parser.parse_args()
+    result = inspect_cloud(args.expected_image)
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["metadata_ready"] else 1
+    return 0 if result["metadata_ready"] and result["job_configuration_verified"] else 1
 
 
 if __name__ == "__main__":

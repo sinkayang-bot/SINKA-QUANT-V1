@@ -40,7 +40,10 @@ cp "$ROOT/backend/Dockerfile.okx-smoke" "$ctx/Dockerfile"
 cp "$ROOT/backend/okx_readonly.py" "$ROOT/backend/okx_orders.py" \
    "$ROOT/backend/okx_pending_orders.py" "$ROOT/backend/okx_smoke.py" "$ctx/"
 image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/okx-smoke:initial"
-gcloud builds submit "$ctx" --project "$PROJECT_ID" --region "$REGION" --tag "$image"
+digest="$(gcloud builds submit "$ctx" --project "$PROJECT_ID" --region "$REGION" --tag "$image" \
+  --suppress-logs --format='value(results.images[0].digest)')"
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "BLOCKED: missing build image digest" >&2; exit 1; }
+image="${image%:*}@${digest}"
 
 # The worker is never deployed here. This job has NO web endpoint and NO trade permission.
 # Secrets are only mapped at execution, not baked into the image or printed.
@@ -50,5 +53,7 @@ gcloud run jobs deploy "$JOB" \
   --set-secrets="OKX_API_KEY=OKX_API_KEY:latest,OKX_API_SECRET=OKX_API_SECRET:latest,OKX_API_PASSPHRASE=OKX_API_PASSPHRASE:latest" \
   --set-env-vars="SINKA_OKX_DEMO=true,SINKA_OKX_READONLY_SMOKE=true" \
   --tasks=1 --parallelism=1 --max-retries=0 --task-timeout=120s \
-  --cpu=1 --memory=512Mi
+  --cpu=1 --memory=512Mi --command=python --args=okx_smoke.py
 echo "CREATED: $JOB (NOT executed). Do not schedule or run until reviewing permissions and costs."
+
+echo "Review this immutable smoke image before configuration verification: $image"
