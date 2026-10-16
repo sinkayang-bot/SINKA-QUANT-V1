@@ -40,8 +40,9 @@ class OKXPositionJournal:
         self.lease_ref = sync_ledger.lease_ref
         self.ref = sync_ledger.lease_ref.parent.document("position_snapshot")
 
+    @staticmethod
     @firestore.transactional
-    def _write(self, tx, worker_id, positions, now):
+    def _write(tx, self, worker_id, positions, now):
         lease_snap = self.lease_ref.get(transaction=tx)
         lease = lease_snap.to_dict() if lease_snap.exists else {}
         if (not worker_id or lease.get("worker_id") != worker_id
@@ -61,7 +62,7 @@ class OKXPositionJournal:
 
     def write_snapshot(self, worker_id, exchange_positions):
         snapshot = normalize_positions(exchange_positions)
-        return self._write(self.db.transaction(), worker_id, snapshot, time.time())
+        return self._write(self.db.transaction(), self, worker_id, snapshot, time.time())
 
     def read_diagnostic(self):
         snap = self.ref.get()
