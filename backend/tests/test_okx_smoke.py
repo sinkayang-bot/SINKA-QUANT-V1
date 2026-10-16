@@ -3,6 +3,7 @@ import asyncio
 from okx_smoke import inspect_demo
 
 class Fake:
+    async def account_config(self): return [{"perm": "read_only"}]
     async def balances(self): return []
     async def swap_positions(self): return []
     async def swap_instruments(self): return []
@@ -82,3 +83,73 @@ def test_startup_guards_prevent_client_creation(monkeypatch):
     monkeypatch.delenv("SINKA_OKX_READONLY_SMOKE", raising=False)
     with pytest.raises(SystemExit, match="disabled by default"):
         okx_smoke.main()
+
+
+import pytest
+
+
+@pytest.mark.parametrize("config", [
+    [{"perm": "read_only,trade"}], [{"perm": "read_only,withdraw"}],
+    [{"perm": "read_only,withdraw,trade"}], [{"perm": "trade"}],
+    [{"perm": "unknown"}], [{"perm": ""}], [{"perm": None}], [{}], [],
+    [{"perm": "read_only"}, {"perm": "trade"}], {"perm": "read_only"},
+    [{"perm": ["read_only"]}], [None],
+])
+def test_unsafe_or_unknown_api_permissions_stop_before_balance_query(config):
+    class Permissions(Fake):
+        async def account_config(self): return config
+        async def balances(self):
+            raise AssertionError("No account reads after permission rejection")
+    result = asyncio.run(inspect_demo(Permissions()))
+    assert result["ok"] is False
+    assert result["failed_stage"] == "account_config"
+    assert result["trading_enabled"] is False
+    assert "perm" not in result
+
+
+def test_config_error_is_sanitized_and_stops_followup_reads():
+    class Failure(Fake):
+        async def account_config(self):
+            raise RuntimeError("private-api-key-permissions")
+        async def balances(self):
+            raise AssertionError("No followup request allowed")
+    result = asyncio.run(inspect_demo(Failure()))
+    assert result["failed_stage"] == "account_config"
+    assert "private-api-key-permissions" not in str(result)
+
+
+def test_readonly_permission_success_has_fixed_evidence_without_account_details():
+    class Config(Fake):
+        async def account_config(self):
+            return [{"perm": "read_only", "uid": "private-uid", "label": "private-label"}]
+    result = asyncio.run(inspect_demo(Config()))
+    assert result["ok"] is True
+    assert result["account_config_endpoint"] == "ok"
+    assert result["api_permissions_readonly"] is True
+    assert "private-uid" not in str(result)
+    assert "private-label" not in str(result)
+
+
+@pytest.mark.parametrize("permissions, expected_requests, success", [
+    ("read_only", 5, True), ("read_only,trade", 1, False),
+])
+def test_full_smoke_transport_is_demo_get_only(monkeypatch, permissions, expected_requests, success):
+    import httpx
+    from okx_readonly import OKXReadOnly
+    calls = []
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.host == "www.okx.com"
+        assert request.headers["x-simulated-trading"] == "1"
+        calls.append(request.url.path)
+        data = [{"perm": permissions}] if request.url.path == "/api/v5/account/config" else []
+        return httpx.Response(200, json={"code": "0", "data": data})
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs:
+                        client_type(**kwargs, transport=httpx.MockTransport(handler)))
+    reader = OKXReadOnly(key="test-key", secret="test-secret", passphrase="test-pass", demo=True)
+    result = asyncio.run(inspect_demo(reader))
+    assert result["ok"] is success
+    assert len(calls) == expected_requests
+    assert calls[0] == "/api/v5/account/config"
+    assert not any(secret in str(result) for secret in ("test-key", "test-secret", "test-pass"))

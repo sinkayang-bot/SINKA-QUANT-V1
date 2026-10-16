@@ -18,7 +18,7 @@ def execution():
 
 def payload():
     return {"ok": True, "mode": "demo_readonly", "trading_enabled": False,
-            "pending_order_count": 0, **{key: "ok" for key in report.ENDPOINTS}}
+            "pending_order_count": 0, "api_permissions_readonly": True, **{key: "ok" for key in report.ENDPOINTS}}
 
 
 def log():
@@ -92,3 +92,17 @@ def test_malformed_logs_are_sanitized(logs):
     result = report.verify_report(execution(), logs, NAME, IMAGE)
     assert result["okx_connection_verified"] is False
     assert "private-secret" not in str(result)
+
+
+def test_old_result_without_permission_evidence_does_not_pass():
+    entry = log()
+    del entry["jsonPayload"]["api_permissions_readonly"]
+    del entry["jsonPayload"]["account_config_endpoint"]
+    assert not report.verify_report(execution(), [entry], NAME, IMAGE)["okx_connection_verified"]
+
+
+@pytest.mark.parametrize("value", [False, "true", 1, None])
+def test_permission_flag_must_be_explicit_boolean(value):
+    entry = log()
+    entry["jsonPayload"]["api_permissions_readonly"] = value
+    assert not report.verify_report(execution(), [entry], NAME, IMAGE)["okx_connection_verified"]

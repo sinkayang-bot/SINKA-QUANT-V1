@@ -6,7 +6,7 @@ import re
 from okx_cloud_preflight import JOB, PROJECT, REGION, metadata
 from okx_job_config import verify_job
 
-ENDPOINTS = ("balances_endpoint", "positions_endpoint", "instruments_endpoint", "pending_orders_endpoint")
+ENDPOINTS = ("account_config_endpoint", "balances_endpoint", "positions_endpoint", "instruments_endpoint", "pending_orders_endpoint")
 EXECUTION_PATTERN = re.compile(re.escape(JOB) + r"-[a-z0-9]{1,32}")
 LOG_LIMIT = 100
 
@@ -22,10 +22,11 @@ def execution_identity(labels):
 
 
 def successful_smoke(payload):
-    expected_keys = {"ok", "mode", "trading_enabled", "pending_order_count", *ENDPOINTS}
+    expected_keys = {"ok", "mode", "trading_enabled", "api_permissions_readonly", "pending_order_count", *ENDPOINTS}
     return (isinstance(payload, dict) and set(payload) == expected_keys
             and payload["ok"] is True and payload["mode"] == "demo_readonly"
             and payload["trading_enabled"] is False
+            and payload["api_permissions_readonly"] is True
             and type(payload["pending_order_count"]) is int and payload["pending_order_count"] >= 0
             and all(payload[key] == "ok" for key in ENDPOINTS))
 

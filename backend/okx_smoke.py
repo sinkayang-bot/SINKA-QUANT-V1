@@ -11,8 +11,13 @@ from okx_readonly import OKXReadOnly
 from okx_pending_orders import pending_swap_inventory
 
 async def inspect_demo(reader):
-    stage = "balances"
+    stage = "account_config"
     try:
+        config = await reader.account_config()
+        if (not isinstance(config, list) or len(config) != 1
+                or not isinstance(config[0], dict) or config[0].get("perm") != "read_only"):
+            raise ValueError("API permissions must be exclusively read-only")
+        stage = "balances"
         balances = await reader.balances()
         if not isinstance(balances, list):
             raise ValueError("Malformed balance response")
@@ -30,6 +35,8 @@ async def inspect_demo(reader):
         return {
             "ok": True,
             "mode": "demo_readonly",
+            "account_config_endpoint": "ok",
+            "api_permissions_readonly": True,
             "balances_endpoint": "ok",
             "positions_endpoint": "ok",
             "instruments_endpoint": "ok",

@@ -49,7 +49,7 @@ Secret 存取及 OKX 連線仍需後續獨立驗證。
 ## 測試失敗診斷
 
 唯讀煙霧測試失敗時，JSON 的 `failed_stage` 會標示固定階段：
-`configuration`、`balances`、`positions`、`instruments` 或 `pending_orders`。
+`configuration`、`account_config`、`balances`、`positions`、`instruments` 或 `pending_orders`。
 任何查詢或資料驗證失敗，立即停止後續查詢；不顯示帳戶金額、持倉內容、
 訂單識別碼、API 回應本文或憑證。缺少憑證也只輸出固定診斷並以非零結束碼結束。
 
@@ -94,8 +94,8 @@ python3 backend/okx_smoke_report.py \
 
 - 執行名稱、所屬 Job 及執行當時的不可變容器設定符合預期。
 - 執行 Completed 為 True，成功一個任務，無失敗、取消、執行中或重試。
-- 同一次執行的日誌有且只有一個完整且成功的 `demo_readonly` 回報，四個
-  唯讀查詢皆為 `ok`，且 `trading_enabled` 明確為 false。
+- 同一次執行的日誌有且只有一個完整且成功的 `demo_readonly` 回報，五個
+  唯讀查詢皆為 `ok`，金鑰唯讀權限驗證為 true，且 `trading_enabled` 明確為 false。
 
 此核對查詢最近 30 天、最多 100 筆日誌。若達到上限、日誌延遲尚未出現、
 回報重複或格式不明，一律視為尚未驗證，不會自動重跑測試。可稍後再次執行
@@ -127,3 +127,21 @@ python3 backend/okx_cloud_preflight.py --before-build
 專案、地區、repository、Job、服務帳戶鎖定為本文件指定的值；環境變數若試圖
 改用其他目標，腳本會在任何雲端指令前拒絕。變更部署腳本也會觸發 GitHub
 後端測試，涵蓋「Secret 停用時不得建置」及「異常目標不得操作雲端」。
+
+## OKX 金鑰權限唯讀驗證
+
+煙霧測試的第一個請求固定為模擬模式的 `GET /api/v5/account/config`。
+根據 OKX 官方文件，回應中的 `perm` 為當前 API key / Access token 的權限；
+本工具僅接受單筆設定且 `perm` 完全等於 `read_only`。
+含 `trade`、`withdraw`、未知權限、缺少欄位或異常格式時，在 `account_config`
+階段停止，不繼續查詢餘額、持倉、商品或未成交訂單，也不修改任何權限。
+
+成功結果新增 `account_config_endpoint: "ok"` 與 `api_permissions_readonly: true`。
+設定回應中的 UID、標籤、IP 等資料均不輸出。結果核對工具也必須讀到這兩項證據，
+舊版未檢查權限的成功日誌不會被視為新版測試通過；需先以新映像重新部署，
+再於雲端存取與費用確認完成後執行新的唯讀測試。
+
+此權限檢查仍只使用 GET 與模擬模式標頭，測試使用假憑證與 HTTP 模擬回應，
+不需要貼出任何真實 API 金鑰。
+
+參考：[OKX Get account configuration](https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-account-configuration)。
