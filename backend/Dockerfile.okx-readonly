@@ -1,0 +1,18 @@
+# Isolated demo-only OKX read-only worker image.
+# No trading endpoints, web app, or secrets are built into this image.
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY okx_readonly.py okx_orders.py okx_risk.py okx_reconcile.py \
+     okx_order_reader.py okx_pending_orders.py okx_fills.py \
+     okx_fill_checkpoint.py okx_fill_audit.py okx_sync.py \
+     okx_firestore_sync.py okx_sync_lease.py okx_order_journal.py \
+     okx_position_journal.py okx_fill_watermark_store.py \
+     okx_readonly_worker.py ./
+RUN python -m compileall -q /app && useradd --system --uid 10001 --home-dir /nonexistent sinka
+USER 10001:10001
+ENV PYTHONUNBUFFERED=1
+ENV SINKA_OKX_READONLY_MONITOR=false
+ENV SINKA_OKX_DEMO=false
+CMD ["python", "okx_readonly_worker.py"]
