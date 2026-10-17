@@ -1,8 +1,18 @@
 # Owner-only demo asset panel
 
-Implementation pending deployment verification. The accepted status-only service
-remains usable until the new image is deployed. An old image returns 404 for the
-new route; the UI explains that a backend update is pending.
+Deployment verified from the owner's Cloud Shell screenshot received on
+**2026-10-17 09:22:57, Asia/Taipei**. Source commit
+`2c594184b3e8c5ce316a57c3e8181e62b53da422` was built and the existing Cloud Run
+service successfully updated, serving 100% of traffic to the new revision.
+The final probe reported `public_health_verified`, `missing_token_denied`,
+`invalid_token_denied`, `assets_readonly_enabled` and `asset_token_probes_denied`
+all true, with `trading_enabled: false`.
+
+The public probe's `okx_connection_verified: false` is expected: it intentionally
+does not read private amounts or run an authenticated exchange scan. The next
+step is the owner's manual asset query from the deployed dashboard. Actual asset
+data and its expiry/logout clearing still require owner browser verification;
+deployment success alone is not recorded as end-to-end asset acceptance.
 
 ## Contract and boundaries
 
