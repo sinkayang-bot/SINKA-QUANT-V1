@@ -24,7 +24,7 @@ jobs:
       - name: Check login module syntax
         run: |
           node --check auth-web.mjs
-          for file in strategy/*.mjs; do node --check "$file"; done
+          for file in strategy/*.mjs worker/*.mjs; do node --check "$file"; done
       - name: Verify read-only session and safe diagnostics
         run: node --test tests/*.test.mjs
       - uses: actions/configure-pages@v5

@@ -1,9 +1,9 @@
 name: Frontend read-only auth tests
 on:
   push:
-    paths: ['*.mjs', 'strategy/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'worker/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
   pull_request:
-    paths: ['*.mjs', 'strategy/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'worker/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
 permissions:
   contents: read
 jobs:
@@ -15,5 +15,14 @@ jobs:
         with:
           node-version: '22'
       - run: node --check auth-web.mjs
-      - run: for file in strategy/*.mjs; do node --check "$file"; done
+      - run: for file in strategy/*.mjs worker/*.mjs; do node --check "$file"; done
       - run: node --test tests/*.test.mjs
+
+  paper-worker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated paper-only worker
+        run: docker build -f worker/Dockerfile -t sinka-paper-worker .
+      - name: Verify non-root image and persistent checkpoint without network
+        run: docker run --rm --network none --entrypoint node sinka-paper-worker worker/container-smoke.mjs

@@ -51,6 +51,10 @@ Reload/new-account clears its data; CSV export preserves all closed fills.
 No automatic start on load. Browser shutdown is not a continuous worker.
 Existing manual paper and old backtest modules remain separate.
 
+A separate [persistent Node paper worker](../worker/README.md) now provides
+SQLite checkpoints and single-host process recovery. It is not deployed and
+does not change the browser-only account lifecycle above.
+
 ## Replay assumptions and limitations
 
 No future candles enter signals. Replay entries use the next candle open,
