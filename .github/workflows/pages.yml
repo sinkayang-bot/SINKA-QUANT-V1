@@ -22,7 +22,9 @@ jobs:
         with:
           node-version: '22'
       - name: Check login module syntax
-        run: node --check auth-web.mjs
+        run: |
+          node --check auth-web.mjs
+          for file in strategy/*.mjs; do node --check "$file"; done
       - name: Verify read-only session and safe diagnostics
         run: node --test tests/*.test.mjs
       - uses: actions/configure-pages@v5

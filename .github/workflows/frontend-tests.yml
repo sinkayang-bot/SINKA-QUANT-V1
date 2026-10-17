@@ -1,9 +1,9 @@
 name: Frontend read-only auth tests
 on:
   push:
-    paths: ['*.mjs', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
   pull_request:
-    paths: ['*.mjs', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
 permissions:
   contents: read
 jobs:
@@ -15,4 +15,5 @@ jobs:
         with:
           node-version: '22'
       - run: node --check auth-web.mjs
+      - run: for file in strategy/*.mjs; do node --check "$file"; done
       - run: node --test tests/*.test.mjs
