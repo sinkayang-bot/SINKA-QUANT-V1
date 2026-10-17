@@ -289,7 +289,7 @@ def main(argv=None):
             version=command(['node','--version']).strip()
             if not re.fullmatch(r'v(?:22|24)\.[0-9]+\.[0-9]+',version):
                 raise SetupBlocked('supported_node_runtime_required')
-            env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='1',
+            env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='1',DEMO_PROGRESS='1',
                 DEMO_INITIALIZE_BASELINE='1' if args.initialize_baseline else '0',
                 DEMO_MAX_SECONDS=str(args.seconds),DEMO_LEDGER_PATH=str(root/'ledger.sqlite'),
                 DEMO_ACCOUNT_SCOPE=binding['account_scope'],OKX_EXPECTED_UID=binding['uid'],

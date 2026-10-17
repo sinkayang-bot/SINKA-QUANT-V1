@@ -87,3 +87,17 @@ Node 22 或 24。不要求填寫金鑰或 UID，不會為了產生測試單而�
 
 Cloud Shell 家目錄的持久儲存及回收限制：
 [Google 官方說明](https://docs.cloud.google.com/shell/docs/how-cloud-shell-works)。
+
+### Runtime progress and restart limitation
+
+The Cloud Shell helper enables fixed-label JSON progress. Status changes print
+immediately; unchanged statuses print every six observed ticks. Final worker
+output includes `tick_counts` and `ticks_observed`. These count supervisor results,
+not orders or fills. No account fields, raw upstream messages or credentials are
+printed. A broken progress output stream does not interrupt recovery.
+
+An idle ledger currently requires audit continuity within 60 seconds. A stopped
+trial resumed after that interval can fail reconciliation even when the account
+looks flat. Do not delete the ledger, change audit timestamps, initialize another
+baseline, or relax this check to resume. Full gap reconciliation remains required
+before a later trial; this progress update does not implement that reconciliation.

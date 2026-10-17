@@ -12,7 +12,7 @@ from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_strategy_source import DemoStrategySource
 from okx_demo_trading_supervisor import DemoTradingSupervisor
 from okx_demo_transport import OKXDemoReadTransport
-from okx_demo_trading_worker import execute
+from okx_demo_trading_worker import execute,DemoProgress,run_supervisor
 import test_okx_demo_trading_session as fixtures
 from test_okx_demo_snapshot import UID
 from test_okx_strategy_bridge import args,READY
@@ -49,6 +49,13 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['phase'],'stopped_no_active_intent')
         self.assertEqual(result['stop_reason'],'stop_requested')
         self.assertEqual(self.sources,[('BTC-USDT-SWAP',self.f.now)])
+        self.assertEqual(self.f.posts,[])
+
+    async def test_worker_wrapper_returns_actual_waiting_counts(self):
+        result=await run_supervisor(self.supervisor,{'DEMO_ARM_ENTRIES':'1'})
+        self.assertEqual(result['stop_reason'],'runtime_limit')
+        self.assertGreaterEqual(result['ticks_observed'],1)
+        self.assertEqual(result['tick_counts'],{'waiting_for_signal':result['ticks_observed']})
         self.assertEqual(self.f.posts,[])
 
     async def test_stop_existing_protected_position_reduces_and_confirms_flat(self):
@@ -136,3 +143,30 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await DemoStrategySource()('BTC-USDT-SWAP',READY))
         self.assertEqual(set(captured['env']),{'PATH'})
         self.assertNotIn('synthetic-secret',str(captured))
+
+
+class ProgressTests(unittest.TestCase):
+    def test_filters_details_and_throttles_unchanged_status(self):
+        import io
+        from contextlib import redirect_stdout
+        stream=io.StringIO(); reporter=DemoProgress(True)
+        with redirect_stdout(stream):
+            for _ in range(7): reporter({'phase':'waiting_for_signal','secret':'private-value'})
+            reporter({'phase':'private-value','uid':'private-uid'})
+        rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual([r['ticks'] for r in rows],[1,6,8])
+        self.assertEqual(reporter.counts,{'waiting_for_signal':7,'other_status':1})
+        self.assertNotIn('private-value',stream.getvalue())
+        self.assertNotIn('private-uid',stream.getvalue())
+
+    def test_quiet_mode_counts_without_printing(self):
+        with patch('builtins.print') as output:
+            reporter=DemoProgress(); reporter({'phase':'entry_gate_blocked'})
+        output.assert_not_called()
+        self.assertEqual(reporter.counts,{'entry_gate_blocked':1})
+
+    def test_broken_output_does_not_interrupt_recovery(self):
+        reporter=DemoProgress(True)
+        with patch('builtins.print',side_effect=BrokenPipeError):
+            reporter({'phase':'waiting_for_signal'})
+        self.assertEqual(reporter.counts,{'waiting_for_signal':1})

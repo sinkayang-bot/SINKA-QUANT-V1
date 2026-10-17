@@ -25,13 +25,43 @@ from okx_demo_transport import DemoCredentials,OKXDemoReadTransport
 REQUIRED=('OKX_API_KEY','OKX_API_SECRET','OKX_API_PASSPHRASE','OKX_EXPECTED_UID','DEMO_ACCOUNT_SCOPE','DEMO_LEDGER_PATH')
 
 
+class DemoProgress:
+    """Report fixed labels only; never serialize account or upstream data."""
+    PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
+        'native_protection_verified_monitor_required','kill_switch_active',
+        'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
+        'exit_unknown_no_retry','cancel_unconfirmed_no_retry',
+        'unsubmitted_intent_recovery_required','disabled','supervisor_not_started',
+        'flat_requires_emergency_settlement_review','exit_observed_no_resubmit'})
+
+    def __init__(self,enabled=False):
+        self.enabled=enabled
+        self.counts={}
+        self.previous=None
+
+    def __call__(self,result):
+        phase=result.get('phase')
+        if phase not in self.PHASES: phase='other_status'
+        self.counts[phase]=self.counts.get(phase,0)+1
+        if self.enabled and (phase!=self.previous or sum(self.counts.values())%6==0):
+            try:
+                print(json.dumps({'mode':'demo_progress','phase':phase,
+                    'ticks':sum(self.counts.values()),'live_trading_enabled':False},
+                    sort_keys=True,separators=(',',':')),flush=True)
+            except OSError:
+                pass
+        self.previous=phase
+
+
 async def run_supervisor(supervisor,env):
     loop=asyncio.get_running_loop(); installed=[]
+    progress=DemoProgress(env.get('DEMO_PROGRESS')=='1')
     try:
         for signum in (signal.SIGINT,signal.SIGTERM):
             loop.add_signal_handler(signum,supervisor.stop); installed.append(signum)
-        return await supervisor.run(initialize_baseline=env.get('DEMO_INITIALIZE_BASELINE')=='1',
-            arm_entries=env.get('DEMO_ARM_ENTRIES')=='1')
+        result=await supervisor.run(initialize_baseline=env.get('DEMO_INITIALIZE_BASELINE')=='1',
+            arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',on_status=progress)
+        return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values())}
     finally:
         for signum in installed: loop.remove_signal_handler(signum)
 
