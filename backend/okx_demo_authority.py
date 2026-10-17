@@ -251,7 +251,9 @@ class DemoEntryAuthority:
         self.db.execute("UPDATE demo_daily SET entries=entries+1 WHERE day=?", (day_key(now),))
         self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
 
-    def record_verified_close(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False):
+    def _record_close_in_transaction(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False):
+        if not self.db.in_transaction:
+            raise ValueError("Atomic close transaction required")
         if audit_verified is not True or not isinstance(close_id, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", close_id):
             raise ValueError("Audited close identity required")
         now = self._now()
@@ -259,22 +261,26 @@ class DemoEntryAuthority:
         if closed > now or day_key(closed) != day_key(now):
             raise ValueError("Current-day completed close required")
         pnl = number(pnl_usdt, allow_negative=True)
+        self._owner(now)
+        old = self.db.execute("SELECT pnl,closed_at FROM demo_risk_close WHERE id=?", (close_id,)).fetchone()
+        if old is not None:
+            if Decimal(old[0]) != pnl or old[1] != closed:
+                raise ValueError("Close identity reused with changed values")
+        else:
+            daily = self.db.execute("SELECT loss_streak,cooldown,last_close FROM demo_daily WHERE day=?", (day_key(now),)).fetchone()
+            if daily is None or closed < daily[2]:
+                raise ValueError("Close chronology or daily baseline missing")
+            streak = daily[0] + 1 if pnl < 0 else 0
+            self.db.execute("INSERT INTO demo_risk_close VALUES(?,?,?)", (close_id, str(pnl), closed))
+            self.db.execute("UPDATE demo_daily SET loss_streak=?,halt=MAX(halt,?),cooldown=?,last_close=? WHERE day=?",
+                (streak, int(streak >= 3), max(daily[1], closed+900000), closed, day_key(now)))
+        self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
+
+    def record_verified_close(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False):
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            self._owner(now)
-            old = self.db.execute("SELECT pnl,closed_at FROM demo_risk_close WHERE id=?", (close_id,)).fetchone()
-            if old is not None:
-                if Decimal(old[0]) != pnl or old[1] != closed:
-                    raise ValueError("Close identity reused with changed values")
-            else:
-                daily = self.db.execute("SELECT loss_streak,cooldown,last_close FROM demo_daily WHERE day=?", (day_key(now),)).fetchone()
-                if daily is None or closed < daily[2]:
-                    raise ValueError("Close chronology or daily baseline missing")
-                streak = daily[0] + 1 if pnl < 0 else 0
-                self.db.execute("INSERT INTO demo_risk_close VALUES(?,?,?)", (close_id, str(pnl), closed))
-                self.db.execute("UPDATE demo_daily SET loss_streak=?,halt=MAX(halt,?),cooldown=?,last_close=? WHERE day=?",
-                    (streak, int(streak >= 3), max(daily[1], closed+900000), closed, day_key(now)))
-            self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
+            self._record_close_in_transaction(close_id, pnl_usdt=pnl_usdt,
+                closed_at_ms=closed_at_ms, audit_verified=audit_verified)
             self.db.execute("COMMIT")
         except Exception:
             self.db.execute("ROLLBACK")

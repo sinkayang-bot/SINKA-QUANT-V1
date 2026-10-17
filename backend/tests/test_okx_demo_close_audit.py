@@ -21,7 +21,7 @@ class CloseAuditTests(unittest.TestCase):
     bootstrap=fixtures.FillAuditTests.bootstrap
 
     def trade(self, short=False):
-        self.audit=DemoClosedTradeAuditor(self.authority); self.bootstrap()
+        self.audit=getattr(self,"auditor_class",DemoClosedTradeAuditor)(self.authority); self.bootstrap()
         broker=FakeExchange()
         engine=DemoExecutor(self.journal,broker,clock=lambda:self.now,
             entry_gate=self.authority.allows,recovery_gate=lambda b:True,enabled=True)

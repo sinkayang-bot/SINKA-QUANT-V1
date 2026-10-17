@@ -165,7 +165,8 @@ class DemoSnapshotReader:
             if any(not isinstance(k, str) or not k for k in key) or key in seen:
                 raise ValueError("Ambiguous position inventory")
             seen.add(key)
-        return dict(mode=mode, equity=str(equity), available=str(available), leverage=int(leverage),
+        return dict(mode=mode, equity=str(equity), available=str(available),
+            cash=None if detail.get("cashBal") in (None, "") else str(number(detail["cashBal"], allow_negative=True)), leverage=int(leverage),
             instrument=instrument, positions=canonical(positions), orders=data["orders"], algos=data["algos"], fills=data["fills"])
 
     async def collect(self):
@@ -188,6 +189,7 @@ class DemoSnapshotReader:
                 "order_permission_verified":second["mode"]["order_permission_verified"],
                 "isolated_leverage":second["leverage"], "instrument":second["instrument"],
                 "equity_usdt":second["equity"], "available_usdt":second["available"],
+                "cash_balance_usdt":second["cash"],
                 "positions":second["positions"], "pending_orders":second["orders"], "pending_algos":second["algos"],
                 "recent_fills":second["fills"], "fill_history_complete":False, "fill_audit_ready":False}
             self.last_snapshot = deepcopy(snapshot)

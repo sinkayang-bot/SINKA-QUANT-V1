@@ -467,3 +467,73 @@ losses, weighted fills, fees/rebates, wrong lineage/trigger parameters, partial
 and non-reducing children, cleanup, rollback, restart and immutable records.
 Selected regression passed **180 tests and 223 subtests** locally. No real
 account access or exchange order/cancel request was made.
+
+## USDT bill/funding settlement and atomic risk publication (offline)
+
+`okx_demo_settlement.py` extends the single-trade close auditor. Construct this
+class before the explicit flat-baseline bootstrap so the original USDT currency
+`cashBal` is persisted atomically with instrument and fill baseline metadata.
+`DemoSnapshotReader` now retains this currency value as `cash_balance_usdt`,
+separately from equity and available amounts, and includes it in double-pass
+comparison. Missing cash remains diagnostic `None`; settlement baseline creation
+rejects it rather than substituting equity. Earlier baselines cannot be upgraded
+by inventing an original cash amount.
+
+A trusted bill-reader contract supplies two independent complete paginated
+responses for the entire account's USDT interval, with exactly currency, begin,
+end and limit query parameters. Instrument/type filtering is not allowed.
+The interval starts at the stored baseline and ends at the current account scan
+start, at least five seconds after the audited close. Both response passes must
+agree. Each pass requires strictly descending unique bill IDs, full intermediate
+100-row pages, a short terminal page and at most 500 rows / six requests.
+This is validation of supplied offline evidence, **not an implemented production
+bill transport or an authentication boundary**. The delay is conservative
+settling time, not a guarantee that OKX cannot publish another bill later.
+
+Supported trade bills (type 2, subtypes 1–6) must match each known fill's instrument,
+order/trade identity, side, contract quantity, price, fee and reported P&L exactly.
+Each fill needs exactly one bill. Supported funding bills (type 8, expense 173 or
+income 174) must have the correct sign, no order/trade identity, zero trading fee,
+matching full held contract size and a timestamp within the completed-entry to
+close interval. Partial-position funding and late posting outside that interval
+are currently unsupported. Unknown transfers, liquidations, adjustments, other
+instruments/currencies, changed historical bills or unbalanced rows reject.
+The supported subset requires `balChg == pnl + fee`; other isolated/account
+movement representations are rejected pending actual response acceptance.
+
+Sum of bill balance changes must equal the closed trade's signed gross P&L plus
+both-side fill fees plus signed funding, and must equal final currency cash minus
+original flat-baseline cash. Cash equality is exact; no residual is hidden in a
+rounding bucket. Close fill anchor/continuity, immutable fill records, fresh owned
+order observation and flat complete inventory checks remain mandatory. An
+unknown post-close fill cannot be silently ignored even if cash still balances.
+
+On success, immutable bills, settlement and `demo_risk_close` publication commit
+in ONE SQLite transaction. Failure in daily-risk publication rolls them all back.
+The authority's internal transactional close primitive is shared with the existing
+public wrapper. Settlement updates loss streak, sticky halt on the third loss,
+and 15-minute cooldown once, using net P&L including funding. Retry/restart cannot
+double-count. Publication currently requires the close to be on the current
+Taipei day with its existing daily baseline; delayed cross-day publication fails
+closed rather than modifying a historical day's risk state.
+
+`funding_audited`/`account_bills_audited` describe the supplied interval **as of
+`reconciled_through_ms`**, not eternal account-history completeness. Late changes
+invalidate a later attempt and are not silently rewritten. Entry readiness stays
+invalid, the old intent remains, and `new_entry_allowed`/`submission_enabled`
+remain false. Next work is a real GET-only bill adapter, multi-intent archival
+and release with current settlement proof, cross-day recovery and deployed
+integration. No actual exchange trading was enabled by these offline checks.
+
+Protocol reference: [OKX Trading Account REST API](https://www.okx.com/docs-v5/en/#trading-account-rest-api-get-bills-details-last-7-days),
+USDT bill `pnl`, signed `fee`, `balChg`, identifiers and funding subtypes.
+Actual demo account bill/isolated balance representation is not accepted yet.
+
+Acceptance: 17 new synthetic tests cover funding expense/income/zero, funding
+turning a profit into a loss, third-loss halt, exactly-once cooldown/publication,
+matching all fill bills, unknown adjustments, complete pagination, cash mismatch,
+post-close fills, double-pass changes, rollback and restart. Intercepted GET
+snapshot checks verify currency cash is retained separately and changes reject.
+Selected regression passed **197 tests and 244 subtests** locally. No account
+credentials, actual account reads, order/cancel requests, GCP deployment or
+billing change were involved.
