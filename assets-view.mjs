@@ -14,6 +14,8 @@ function table(id, rows) {
   }
 }
 export function renderAssets(state, messages) {
+  const masked=$('asset-hide-details')?.checked===true;
+  const showDetails=state.verified && !masked;
   const fullPrecision=$('asset-full-precision')?.checked===true;
   const amount=value=>formatAssetAmount(value,{fullPrecision});
   const usd=value=>formatAssetAmount(value,{places:2,minPlaces:2,fullPrecision});
@@ -29,14 +31,17 @@ export function renderAssets(state, messages) {
     state.phase === 'signed_in' ? '已登入，按「更新模擬帳戶資產」讀取本次資料。' :
     state.phase === 'expired' ? '資產資料已過期並清除，請手動更新。' : messages[state.phase] || messages.unavailable;
   $('asset-private').hidden = !state.verified;
+  if($('asset-details'))$('asset-details').hidden=!showDetails;
+  if($('asset-privacy-notice'))$('asset-privacy-notice').textContent=state.verified && masked?
+    '資產明細已從畫面移除。資料仍只保留於本頁記憶體，最多 30 秒後清除。':'';
   $('asset-checked').textContent = state.verified ? '查詢完成：' + new Date(state.checkedAt).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}) + '（台灣）；最多 30 秒內有效。' : '';
-  $('asset-equity').textContent = state.verified ? usd(state.assets.summary.total_equity_usd) : '—';
-  const data = state.verified ? state.assets : {currencies:[],positions:[],pending_orders:[]};
+  $('asset-equity').textContent = showDetails ? usd(state.assets.summary.total_equity_usd) : '—';
+  const data = showDetails ? state.assets : {currencies:[],positions:[],pending_orders:[]};
   table('asset-currencies',data.currencies.map(r=>[r.currency,amount(r.equity),amount(r.cash_balance),amount(r.available_balance),amount(r.unrealized_pnl)]));
   table('asset-positions',data.positions.map(r=>[r.instrument,sides[r.side],sides[r.margin_mode],r.contracts,amount(r.average_price),amount(r.mark_price),amount(r.unrealized_pnl),r.currency,usd(r.notional_usd)]));
   table('asset-orders',data.pending_orders.map(r=>[r.instrument,sides[r.side],sides[r.position_side],sides[r.state],r.contracts,r.filled_contracts,amount(r.price)]));
   for (const [id,items,label] of [['asset-currencies-empty',data.currencies,'本次未回傳幣別資料。'],
     ['asset-positions-empty',data.positions,'本次查詢沒有非零持倉。'],['asset-orders-empty',data.pending_orders,'本次查詢沒有未完成委託。']]) {
-    $(id).textContent = state.verified && !items.length ? label : '';
+    $(id).textContent = showDetails && !items.length ? label : '';
   }
 }

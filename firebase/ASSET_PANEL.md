@@ -44,6 +44,16 @@ restores exact source strings without a request or any mutation of the snapshot.
 Missing amounts remain unavailable, distinct from zero. Toggling cannot restore
 expired data because it reads the expiry-checked session before rendering.
 
+The privacy revision adds a page-memory-only "隱藏資產明細" preference that can
+be selected before a query. While selected, the summary and every currency,
+position and pending-order cell are removed from the DOM, including empty-state
+inventory messages. The panel retains only fixed query status and timestamps.
+This is display privacy, not a logout: the validated snapshot remains in session
+memory until its original expiry so it can be shown again without a request.
+Unhiding always checks expiry first and cannot recover an expired snapshot.
+The preference is not persisted, and no balance or inventory is added to
+diagnostic copying. Unit tests cover DOM removal and unhide-after-expiry.
+
 ## Contract and boundaries
 
 `GET /api/okx/assets` uses the same Firebase owner UID and revoked-token check as
