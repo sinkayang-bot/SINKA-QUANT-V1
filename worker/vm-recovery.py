@@ -20,14 +20,40 @@ def disk_identity(instance, disk):
     return {"id": str(disk["id"]), "source": disk["selfLink"], "created": disk.get("creationTimestamp")}
 
 
-def baseline(instance, disk, serial):
-    report = vm.verify(instance, serial)
+def identity(instance, disk):
+    report = vm.verify(instance, "")
     if not report["configuration_ok"] or instance.get("status") not in {"RUNNING", "TERMINATED"} or not instance.get("id"):
         raise ValueError("Existing VM configuration is not the bounded paper trial")
+    return {"vm_id": str(instance["id"]), "disk": disk_identity(instance, disk)}
+
+
+def baseline(instance, disk, serial):
+    result = identity(instance, disk)
     events = vm.parse_events(serial)
     if not events or not events[-1].get("revision", 0) >= 2:
         raise ValueError("No persisted worker baseline; do not restart to manufacture acceptance")
-    return {"vm_id": str(instance["id"]), "disk": disk_identity(instance, disk), "event": events[-1]}
+    return {**result, "event": events[-1]}
+
+
+def warmup(before_identity, instance, disk, serial, started_at, now=None):
+    now = now or datetime.now(timezone.utc)
+    if identity(instance, disk) != before_identity:
+        raise ValueError("Existing VM/disk changed during warmup")
+    start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    if start.tzinfo is None:
+        raise ValueError("Missing warmup timezone")
+    events = [e for e in vm.parse_events(serial) if datetime.fromisoformat(e["at"]) >= start - timedelta(seconds=5)]
+    first = next((e for e in events if e["status"] in {"starting", "recovery_pending"}), None)
+    if first and first.get("revision", 0) < 2:
+        raise ValueError("Warmup did not reopen a previously persisted checkpoint")
+    latest = events[-1] if events else None
+    ready = False
+    if first and latest:
+        fresh = -5 <= (now - datetime.fromisoformat(latest["at"])).total_seconds() <= 90 and latest["quoteFresh"]
+        recovered = any(e["status"] == "recovered" and not e["positionOpen"] and e["quoteFresh"] for e in events)
+        ready = instance.get("status") == "RUNNING" and fresh and (latest["active"] or recovered)
+    # A warmup alone never claims full restart acceptance. Actual counters are captured next.
+    return {"warmup_ready": bool(ready), "existing_checkpoint_reopened": bool(first), "restart_acceptance_complete": False}
 
 
 def compare(before, instance, disk, serial, started_at, now=None):
@@ -72,7 +98,14 @@ if __name__ == "__main__":
     def load(path):
         return json.loads(Path(path).read_text())
     try:
-        if sys.argv[1] == "before":
+        if sys.argv[1] == "identity":
+            value = identity(load(sys.argv[2]), load(sys.argv[3]))
+            Path(sys.argv[4]).write_text(json.dumps(value))
+        elif sys.argv[1] == "warmup":
+            value = warmup(load(sys.argv[2]), load(sys.argv[3]), load(sys.argv[4]), Path(sys.argv[5]).read_text(), sys.argv[6])
+            print(json.dumps(value))
+            sys.exit(0 if value["warmup_ready"] else 3)
+        elif sys.argv[1] == "before":
             value = baseline(load(sys.argv[2]), load(sys.argv[3]), Path(sys.argv[4]).read_text())
             Path(sys.argv[5]).write_text(json.dumps(value))
         else:

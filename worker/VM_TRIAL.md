@@ -150,3 +150,21 @@ was `2026-10-17T09:00:41.585000+00:00`; `cloud_acceptance_complete=true` and
 `trading_enabled=false`. This proves bounded cloud startup, not 24-hour uptime,
 completed trades, profitability or successful restart recovery. No private OKX
 account values, identifiers or screenshot contents are copied to this report.
+
+### Already-stopped VM and unavailable serial logs
+
+The owner's 2026-10-17 screenshot confirmed `TERMINATED` at Taiwan 17:15:20.
+The first restart attempt stopped **before any stop/start action**, because
+Compute Engine returned `resource ... is not ready` for the stopped VM's serial
+output. The prior script incorrectly required readable old serial evidence.
+This is not evidence of a disk reset or lost ledger.
+
+The revised helper first captures VM/disk identity without serial. If already
+stopped, it performs one bounded warmup start, requiring a new-boot event that
+opens an existing checkpoint (revision at least two), validates the same
+configuration and obtains a fresh quote. A new revision-one account is rejected.
+Warmup alone never counts as restart acceptance. Only then does it capture
+actual readable ledger counters, stop/start the same VM and run the original
+full comparison. This may perform two short starts in the existing trial
+budget; each retains the 30-minute provider STOP limit. No resources are
+created, disks reset, worker source changed or runtime bounds removed.

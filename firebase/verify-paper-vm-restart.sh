@@ -18,11 +18,43 @@ name=sinka-paper-trial
 snapshot() {
   gcloud compute instances describe "$name" --project "$project" --zone "$zone" --format=json > "$work/instance.json"
   gcloud compute disks describe "$name" --project "$project" --zone "$zone" --format=json > "$work/disk.json"
-  gcloud compute instances get-serial-port-output "$name" --project "$project" --zone "$zone" --port=1 > "$work/serial.txt" || : > "$work/serial.txt"
+  gcloud compute instances get-serial-port-output "$name" --project "$project" --zone "$zone" --port=1 > "$work/serial.txt" 2> "$work/serial.error" || : > "$work/serial.txt"
 }
 snapshot
-python3 "$root/worker/vm-recovery.py" before "$work/instance.json" "$work/disk.json" "$work/serial.txt" "$work/before.json"
+# Capture immutable disk/VM identity before any start, even when serial is unavailable.
+python3 "$root/worker/vm-recovery.py" identity "$work/instance.json" "$work/disk.json" "$work/identity.json"
 state="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["status"])' "$work/instance.json")"
+if [[ "$state" == TERMINATED ]]; then
+  echo 'VM is already stopped. Starting it briefly to read the retained checkpoint; this is not restart acceptance yet.'
+  warmup_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  gcloud compute instances start "$name" --project "$project" --zone "$zone" --quiet
+  warmup_ready=false
+  for attempt in $(seq 1 30); do
+    snapshot
+    if python3 "$root/worker/vm-recovery.py" warmup "$work/identity.json" "$work/instance.json" "$work/disk.json" "$work/serial.txt" "$warmup_at" > "$work/warmup.json"; then
+      warmup_ready=true
+      break
+    else
+      code=$?
+      if [[ "$code" != 3 ]]; then
+        cat "$work/warmup.json"
+        gcloud compute instances stop "$name" --project "$project" --zone "$zone" --quiet
+        exit 2
+      fi
+    fi
+    if (( attempt % 3 == 1 )); then echo 'Waiting for the existing checkpoint and public quote after warmup…'; fi
+    sleep 10
+  done
+  if [[ "$warmup_ready" != true ]]; then
+    cat "$work/warmup.json"
+    echo 'Warmup could not verify the retained checkpoint; stopping without deleting data.' >&2
+    gcloud compute instances stop "$name" --project "$project" --zone "$zone" --quiet
+    exit 2
+  fi
+  state=RUNNING
+fi
+# Now collect an actual readable pre-restart ledger baseline; never substitute a fabricated counter.
+python3 "$root/worker/vm-recovery.py" before "$work/instance.json" "$work/disk.json" "$work/serial.txt" "$work/before.json"
 if [[ "$state" == RUNNING ]]; then
   echo 'Stopping the existing paper VM; its disk and checkpoint are retained.'
   gcloud compute instances stop "$name" --project "$project" --zone "$zone" --quiet

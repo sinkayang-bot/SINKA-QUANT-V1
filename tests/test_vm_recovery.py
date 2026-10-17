@@ -87,6 +87,33 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse(module.compare(before(), i, disk(), logs, T, NOW)['restart_acceptance_complete'])
         self.assertFalse(module.compare(before(), instance(), disk(), logs, T, datetime(2026, 10, 17, 10, tzinfo=timezone.utc))['restart_acceptance_complete'])
 
+class WarmupTests(unittest.TestCase):
+    def test_stopped_identity_can_be_saved_without_serial(self):
+        value = instance()
+        value['status'] = 'TERMINATED'
+        saved = module.identity(value, disk())
+        self.assertEqual(saved['vm_id'], '42')
+        self.assertNotIn('event', saved)
+
+    def test_new_boot_with_existing_ledger_is_warmup_only(self):
+        logs = event('starting') + '\n' + event(at='2026-10-17T09:01:00Z')
+        report = module.warmup(module.identity(instance(), disk()), instance(), disk(), logs, T, NOW)
+        self.assertTrue(report['warmup_ready'])
+        self.assertFalse(report['restart_acceptance_complete'])
+
+    def test_fresh_account_or_changed_disk_is_rejected(self):
+        saved = module.identity(instance(), disk())
+        with self.assertRaises(ValueError):
+            module.warmup(saved, instance(), disk(), event('starting', revision=1), T, NOW)
+        changed = disk()
+        changed['id'] = 'replacement'
+        with self.assertRaises(ValueError):
+            module.warmup(saved, instance(), changed, '', T, NOW)
+
+    def test_old_events_do_not_finish_warmup(self):
+        report = module.warmup(module.identity(instance(), disk()), instance(), disk(), event('starting', at='2026-10-17T08:58:00Z'), T, NOW)
+        self.assertFalse(report['warmup_ready'])
+
 
 if __name__ == '__main__':
     unittest.main()
