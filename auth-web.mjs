@@ -1,8 +1,8 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
 import {createStatusSession} from './readonly-session.mjs?v=countdown-1';
-import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=countdown-1';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=amounts-1';
 import {createAssetsSession} from './readonly-assets.mjs?v=countdown-1';
-import {renderAssets} from './assets-view.mjs?v=assets-2';
+import {renderAssets} from './assets-view.mjs?v=amounts-1';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
@@ -99,6 +99,7 @@ logout.addEventListener('click', async () => {
 });
 refresh.addEventListener('click', () => {if(assetsSession.getState().phase!=='checking')session.refresh();});
 $('asset-refresh')?.addEventListener('click',()=>{if(session.getState().phase!=='checking')assetsSession.refresh();});
+$('asset-full-precision')?.addEventListener('change',()=>renderAssets(assetsSession.getState(),messages));
 $('owner-copy-diagnostic')?.addEventListener('click', async () => {
   const context={
     signedIn: Boolean(auth?.currentUser), serviceConfigured: Boolean(STATUS_API_BASE_URL),

@@ -35,6 +35,15 @@ clock pauses while hidden and rechecks expiry when visible again. An early
 platform timeout is re-armed to the remaining deadline. These behaviors have
 unit coverage; they do not imply a newly completed live browser acceptance test.
 
+The amounts presentation revision groups thousands, shows USD amounts with two
+decimal places, and shows other monetary fields with up to eight decimal places.
+A leading approximation sign marks nonzero discarded digits. Rounding is decimal
+half-up using integer/string operations, never binary floating-point conversion.
+Contract counts stay at source precision. A checkbox inside the private panel
+restores exact source strings without a request or any mutation of the snapshot.
+Missing amounts remain unavailable, distinct from zero. Toggling cannot restore
+expired data because it reads the expiry-checked session before rendering.
+
 ## Contract and boundaries
 
 `GET /api/okx/assets` uses the same Firebase owner UID and revoked-token check as
