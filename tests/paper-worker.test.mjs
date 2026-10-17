@@ -121,3 +121,12 @@ test('recovery continues to carry its recovery label through an unavailable firs
   let calls=0;const r=createPaperRunner({symbol:SYMBOL,initialAccount:account(),now:()=>T+81*M,setTimer:()=>1,clearTimer:()=>{},market:{snapshot:async()=>{if(++calls===1)throw Error('offline');return snapshot();}}});
   await r.start();await r.poll();assert.equal(r.getState().account.closed[0].reason,'recovery');assert.equal(r.getState().status,'recovered');r.dispose();
 });
+test('worker heartbeat exposes quote freshness without amounts or credentials',async()=>tempAsync(async path=>{
+  let heartbeat,ready;const started=new Promise(resolve=>{ready=resolve;});const logs=[];let time=T+81*M;
+  const pending=runWorker({symbol:SYMBOL,db:path,maxSeconds:1,once:false},{market:{snapshot:async()=>snapshot()},now:()=>time,
+    log:row=>{logs.push(row);if(row.status==='waiting_signal')ready();},processSignals:false,setHeartbeat:fn=>{heartbeat=fn;return 1;},clearHeartbeat:()=>{}});
+  await started;for(let i=0;i<6;i++)heartbeat();assert.equal(logs.at(-1).event,'heartbeat');assert.equal(logs.at(-1).quoteFresh,true);
+  time+=20000;for(let i=0;i<6;i++)heartbeat();assert.equal(logs.at(-1).quoteFresh,false);
+  assert.ok(logs.every(row=>!('cash' in row)&&!('Authorization' in row)&&!('price' in row)));
+  assert.equal(await pending,0);
+}));

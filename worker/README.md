@@ -72,7 +72,8 @@ lease before deployment. This release creates no cloud resource or charge.
   they do not fabricate a close. A crash is recoverable from the last committed
   checkpoint. A storage failure stops all further strategy polling/entries.
 - Logs contain only mode/version, status, active/position flags, trade counts
-  and revision. No API key input, credentials, financial account data or raw
+  and revision, plus sanitized event/quote timestamps and freshness. A heartbeat
+is logged every 30 seconds. No API key input, credentials, financial account data or raw
   transport errors are logged.
 
 Exit 0 means bounded/normal stop or successful recovery flatten. Exit 2 means
@@ -81,6 +82,10 @@ failure stop. Supervisors must avoid immediate restart loops and must allow
 at least the 30-second lease to expire after an ungraceful crash. Paper results
 can differ through outages: fills use the next observed valid price, never an
 invented historical fill. No part of this lifecycle guarantees profitability.
+
+A separate [30-minute GCP VM trial proposal](VM_TRIAL.md) includes a default
+no-op deployment plan, source integrity checks and read-only cloud verification.
+It requires new cost approval and is not an executed deployment.
 
 ## Verification
 

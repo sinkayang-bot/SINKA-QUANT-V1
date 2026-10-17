@@ -18,10 +18,12 @@ export function options(args){
 export async function runWorker(config,{market=createMarketClient(),log=line=>process.stdout.write(JSON.stringify(line)+'\n'),
   now=Date.now,processSignals=true,setHeartbeat=setInterval,clearHeartbeat=clearInterval}={}){
   const store=openPaperStore(config.db,{symbol:config.symbol,now});let runner,heartbeat=null,limit=null,done=false;
-  let lastStatus=null,resolveDone;
+  let lastStatus=null,resolveDone,heartbeatTicks=0;
   const completed=new Promise(resolve=>{resolveDone=resolve;});
   const stateLog=s=>({mode:'local_paper',strategy:RULES.version,status:s.status,active:s.active,
-    positionOpen:Boolean(s.account.position),closedTrades:s.account.closed.length,revision:store.revision});
+    positionOpen:Boolean(s.account.position),closedTrades:s.account.closed.length,revision:store.revision,
+    at:new Date(now()).toISOString(),lastQuoteAt:s.lastQuoteTs===null?null:new Date(s.lastQuoteTs).toISOString(),
+    quoteFresh:s.lastQuoteTs!==null&&now()-s.lastQuoteTs>=-2000&&now()-s.lastQuoteTs<=RULES.quoteAgeMs});
   function finish(code){
     if(done)return;done=true;
     if(heartbeat!==null)clearHeartbeat(heartbeat);if(limit!==null)clearTimeout(limit);
@@ -39,7 +41,7 @@ export async function runWorker(config,{market=createMarketClient(),log=line=>pr
       if(!s.busy&&!s.active&&!s.account.position&&['market_error','interrupted','missing_bars','recovered'].includes(s.status))finish(s.status==='recovered'?0:2);
     }});
     if(processSignals){process.on('SIGTERM',onStop);process.on('SIGINT',onStop);}
-    heartbeat=setHeartbeat(()=>{try{store.renew();}catch{finish(2);}},5000);
+    heartbeat=setHeartbeat(()=>{try{store.renew();if(++heartbeatTicks%6===0)log({...stateLog(runner.getState()),event:'heartbeat'});}catch{finish(2);}},5000);
     if(config.maxSeconds!==null)limit=setTimeout(()=>{finish(0);},config.maxSeconds*1000);
     await runner.start();
     if(config.once&&!done){finish(0);}
