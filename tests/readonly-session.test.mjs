@@ -12,6 +12,7 @@ function setup(options = {}) {
   let time = START, counter = 0;
   const changes = [], timers = new Map(), calls = [];
   const s = createStatusSession({baseUrl:BASE, now:()=>time,
+    monotonicNow:()=>time-START,
     setTimer:(fn,ms)=>{const id=++counter;timers.set(id,{fn,ms});return id;},
     clearTimer:id=>timers.delete(id), onChange:x=>changes.push(x),
     fetcher:async (...args)=>{calls.push(args);return {ok:true,json:async()=>payload()};}, ...options});
@@ -119,4 +120,22 @@ test('a permitted five-second server clock lead cannot extend local freshness be
   h.setTime(START+30000);
   [...h.timers.values()].find(t=>t.ms===30000).fn();
   assert.equal(h.s.getState().phase,'expired');assert.equal(h.s.getState().verified,false);
+});
+test('monotonic expiry clears evidence even when the wall clock is moved backward',async()=>{
+  let elapsed=0;const h=setup({monotonicNow:()=>elapsed});h.s.setUser(h.user);await h.s.refresh();
+  h.setTime(START-600000);elapsed=12000;assert.equal(h.s.getRemainingMs(),18000);
+  elapsed=30000;assert.equal(h.s.getState().phase,'expired');assert.equal(h.s.getRemainingMs(),0);
+});
+test('reading the countdown never refreshes credentials or sends extra network requests',async()=>{
+  let tokens=0;const h=setup();h.s.setUser({getIdToken:async()=>{tokens++;return 'private-token';}});await h.s.refresh();
+  for(let seconds=0;seconds<=30;seconds++){h.setTime(START+seconds*1000);assert.equal(h.s.getRemainingMs(),Math.max(0,30000-seconds*1000));}
+  assert.equal(tokens,1);assert.equal(h.calls.length,1);assert.equal(h.s.getState().verified,false);
+});
+test('an early platform timer cannot strand a verified indicator after its deadline',async()=>{
+  const h=setup();h.s.setUser(h.user);await h.s.refresh();
+  h.setTime(START+29999);[...h.timers.values()].find(t=>t.ms===30000).fn();
+  assert.equal(h.s.getState().verified,true);
+  const finalTimer=[...h.timers.values()].find(t=>t.ms===1);assert.ok(finalTimer);
+  h.setTime(START+30000);finalTimer.fn();assert.equal(h.s.getState().phase,'expired');
+  assert.equal(h.calls.length,1);
 });

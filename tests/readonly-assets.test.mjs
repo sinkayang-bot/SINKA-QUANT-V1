@@ -9,10 +9,11 @@ const payload=()=>({schema_version:1,mode:'demo_readonly',trading_enabled:false,
   summary:{total_equity_usd:'1234.567890123456789',uid:'PRIVATE_UID'},
   currencies:[{currency:'USDT',equity:'1234.5',cash_balance:'1200',available_balance:null,unrealized_pnl:'34.5',key:'PRIVATE_KEY'}],
   positions:[],pending_orders:[]});
-function setup(fetcher=async()=>({ok:true,status:200,json:async()=>payload()})) {
+function setup(fetcher=async()=>({ok:true,status:200,json:async()=>payload()}),options={}) {
   let time=now,count=0;const timers=new Map(),changes=[];
   const session=createAssetsSession({baseUrl:'https://sinka-test.run.app',fetcher,now:()=>time,
-    setTimer:(fn,ms)=>{timers.set(++count,{fn,ms});return count;},clearTimer:id=>timers.delete(id),onChange:s=>changes.push(s)});
+    monotonicNow:()=>time-now,
+    setTimer:(fn,ms)=>{timers.set(++count,{fn,ms});return count;},clearTimer:id=>timers.delete(id),onChange:s=>changes.push(s),...options});
   return {session,changes,timers,setTime:v=>{time=v;},user:{getIdToken:async()=>'PRIVATE_TOKEN'}};
 }
 test('asset parser preserves exact decimal strings and nulls while stripping unknown fields',()=>{
@@ -57,4 +58,10 @@ test('a failed subsequent asset query never retains the previous snapshot',async
   let calls=0;const h=setup(async()=>++calls===1?{ok:true,status:200,json:async()=>payload()}:{ok:false,status:503});
   h.session.setUser(h.user);await h.session.refresh();h.setTime(now+30001);await h.session.refresh();
   assert.equal(h.session.getState().assets,undefined);assert.equal(h.session.getState().phase,'server_error');
+});
+test('asset amounts are cleared by elapsed-time expiry after a wall-clock rollback',async()=>{
+  let elapsed=0;const h=setup(undefined,{monotonicNow:()=>elapsed});h.session.setUser(h.user);await h.session.refresh();
+  h.setTime(now-600000);elapsed=30000;
+  [...h.timers.values()].find(t=>t.ms===30000).fn();
+  assert.equal(h.session.getState().assets,undefined);assert.equal(h.session.getState().phase,'expired');
 });

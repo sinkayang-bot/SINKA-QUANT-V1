@@ -1,4 +1,4 @@
-import {freshnessEvidence, createStatusSession} from './readonly-session.mjs?v=assets-1';
+import {freshnessEvidence, createStatusSession} from './readonly-session.mjs?v=countdown-1';
 
 const SYMBOLS = new Set(['BTC-USDT-SWAP','ETH-USDT-SWAP','SOL-USDT-SWAP','XRP-USDT-SWAP','DOGE-USDT-SWAP']);
 const numeric = value => value === null || (typeof value === 'string' && value.length <= 96 && /^-?\d+(?:\.\d+)?$/.test(value));

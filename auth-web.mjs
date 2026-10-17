@@ -1,7 +1,7 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
-import {createStatusSession} from './readonly-session.mjs?v=assets-1';
-import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=assets-1';
-import {createAssetsSession} from './readonly-assets.mjs?v=assets-1';
+import {createStatusSession} from './readonly-session.mjs?v=countdown-1';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=countdown-1';
+import {createAssetsSession} from './readonly-assets.mjs?v=countdown-1';
 import {renderAssets} from './assets-view.mjs?v=assets-2';
 
 const $ = id => document.getElementById(id);
@@ -27,6 +27,7 @@ let assetsSession;
 const diagnosticOutput = $('owner-diagnostic-output'), diagnosticNotice = $('owner-diagnostic-notice');
 if ($('owner-version')) $('owner-version').textContent = '介面版本：' + FRONTEND_VERSION;
 const session = createStatusSession({baseUrl: STATUS_API_BASE_URL, onChange: state => {
+  if(!state.verified && $('owner-validity-countdown'))$('owner-validity-countdown').textContent='';
   if (diagnosticOutput) { diagnosticOutput.value = ''; diagnosticOutput.hidden = true; }
   if (diagnosticNotice) diagnosticNotice.textContent = '';
   status.textContent = messages[state.phase] || messages.unavailable;
@@ -46,6 +47,7 @@ const session = createStatusSession({baseUrl: STATUS_API_BASE_URL, onChange: sta
   time.textContent = state.verified ? '檢查完成：' + new Date(state.checkedAt).toLocaleString('zh-TW', {timeZone: 'Asia/Taipei'}) + '（台灣）；30 秒內有效。' : '';
 }});
 assetsSession = createAssetsSession({baseUrl:STATUS_API_BASE_URL,onChange:state=>{
+  if(!state.verified && $('asset-validity-countdown'))$('asset-validity-countdown').textContent='';
   if (diagnosticOutput) {diagnosticOutput.value='';diagnosticOutput.hidden=true;}
   if (diagnosticNotice) diagnosticNotice.textContent='';
   renderAssets(state,messages); syncRefreshButtons();
@@ -112,10 +114,20 @@ $('owner-copy-diagnostic')?.addEventListener('click', async () => {
   }
 });
 function checkExpiry(){session.checkExpiry();assetsSession.checkExpiry();}
-document.addEventListener('visibilitychange', checkExpiry);
-window.addEventListener('focus', checkExpiry);
-window.addEventListener('pagehide', () => {session.setUser(null);assetsSession.setUser(null);});
-window.addEventListener('pageshow', () => { if (auth) renderUser(auth.currentUser); });
+let validityClock=null;
+function updateValidityCountdown(){
+  for(const [id,controller,label] of [['owner-validity-countdown',session,'連線結果'],['asset-validity-countdown',assetsSession,'資產資料']]){
+    const milliseconds=controller.getRemainingMs(), element=$(id);
+    if(element)element.textContent=milliseconds>0?label+'尚有 '+Math.ceil(milliseconds/1000)+' 秒有效；到期會清除。':'';
+  }
+}
+function stopValidityClock(){if(validityClock!==null)clearInterval(validityClock);validityClock=null;}
+function startValidityClock(){updateValidityCountdown();if(validityClock===null && document.visibilityState!=='hidden')validityClock=setInterval(updateValidityCountdown,1000);}
+document.addEventListener('visibilitychange',()=>{checkExpiry();document.visibilityState==='hidden'?stopValidityClock():startValidityClock();});
+window.addEventListener('focus',()=>{checkExpiry();updateValidityCountdown();});
+window.addEventListener('pagehide',()=>{stopValidityClock();session.setUser(null);assetsSession.setUser(null);updateValidityCountdown();});
+window.addEventListener('pageshow',()=>{if(auth)renderUser(auth.currentUser);startValidityClock();});
+startValidityClock(); // UI clock only; never refreshes a token or calls an API.
 
 try {
   const [appSdk, authSdk] = await Promise.all([

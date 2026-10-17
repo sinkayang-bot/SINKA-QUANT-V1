@@ -33,15 +33,17 @@ export function freshnessEvidence(data, now) {
 
 export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
     now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
+    monotonicNow = () => performance.now(),
     resource = 'status', resultValidator = verifiedResult}) {
   const endpoint = statusEndpoint(baseUrl, resource);
   let user = null, generation = 0, pending = null, expiryTimer = null;
+  let monotonicExpiry = null;
   let state = {phase: 'signed_out', verified: false};
   const publish = (phase, extra = {}) => {
     state = {phase, verified: phase === 'verified', ...extra};
     onChange({...state});
   };
-  const clearExpiry = () => { if (expiryTimer !== null) clearTimer(expiryTimer); expiryTimer = null; };
+  const clearExpiry = () => { if (expiryTimer !== null) clearTimer(expiryTimer); expiryTimer = null; monotonicExpiry = null; };
   function setUser(value) {
     generation++;
     pending?.abort(); pending = null;
@@ -49,9 +51,19 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
     publish(user ? (endpoint ? 'signed_in' : 'service_pending') : 'signed_out');
   }
   function checkExpiry() {
-    if (state.verified && now() >= state.expiresAt) {
+    if (state.verified && (now() >= state.expiresAt || monotonicNow() >= monotonicExpiry)) {
       clearExpiry(); publish('expired');
     }
+  }
+  function remainingMs() {
+    return state.verified ? Math.max(0,Math.min(state.expiresAt-now(),monotonicExpiry-monotonicNow(),30000)) : 0;
+  }
+  function armExpiry(version) {
+    expiryTimer=setTimer(()=>{
+      if(version!==generation) return;
+      expiryTimer=null;checkExpiry();
+      if(state.verified) armExpiry(version); // Re-arm if the platform timer fired early.
+    },Math.max(1,Math.ceil(remainingMs())));
   }
   async function refresh() {
     checkExpiry();
@@ -89,8 +101,9 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
       failureStage = 'validation';
       const clean = resultValidator(data, now());
       if (!clean) { publish('invalid_result', {failureStage, httpStatus}); return; }
+      monotonicExpiry=monotonicNow()+Math.max(0,Math.min(30000,clean.expiresAt-now()));
       publish('verified', clean);
-      expiryTimer = setTimer(() => { if (version === generation) checkExpiry(); }, Math.min(30000, clean.expiresAt - now()));
+      if(state.verified) armExpiry(version);
     } catch {
       if (version === generation) publish(controller.signal.aborted ? 'timeout' :
         failureStage === 'token' ? 'login_unavailable' : failureStage === 'request' ? 'network_error' :
@@ -102,5 +115,6 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
       if (version === generation && state.phase === 'checking') publish('timeout', {failureStage, httpStatus});
     }
   }
-  return {setUser, refresh, checkExpiry, getState: () => {checkExpiry(); return {...state};}};
+  return {setUser, refresh, checkExpiry, getState: () => {checkExpiry(); return {...state};},
+    getRemainingMs:()=>{checkExpiry();return remainingMs();}};
 }

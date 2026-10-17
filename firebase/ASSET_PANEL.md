@@ -27,6 +27,14 @@ every possible populated-table case, or authorize a trade.
 Automatic clearing after 30 seconds and clearing on logout have automated unit
 coverage; their live owner-browser behavior has not yet been separately confirmed.
 
+The next frontend revision adds a visible seconds-remaining indicator. It reads
+only local session state and never refreshes a Firebase token or sends an API
+request. Freshness is bounded by both the wall clock and a monotonic elapsed-time
+deadline so moving the computer clock backward cannot extend a snapshot. The UI
+clock pauses while hidden and rechecks expiry when visible again. An early
+platform timeout is re-armed to the remaining deadline. These behaviors have
+unit coverage; they do not imply a newly completed live browser acceptance test.
+
 ## Contract and boundaries
 
 `GET /api/okx/assets` uses the same Firebase owner UID and revoked-token check as
