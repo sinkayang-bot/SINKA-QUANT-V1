@@ -1,9 +1,11 @@
 # OKX demo execution development — offline only
 
-`okx_demo_intent.py` and `okx_demo_protection.py` are isolated building blocks. It is not wired into
-any HTTP API, container, deployment script, paper worker or read-only adapter.
-It has no network transport, credentials, environment credential lookup, submit
-method or journal unlock. Its outputs cannot authorize exchange execution.
+The demo intent, protection, strategy bridge and executor modules remain isolated
+from every HTTP API, container, deployment script, paper worker and read-only
+adapter. There is no network transport, credential lookup or journal unlock.
+The new executor only coordinates an explicitly marked fake demo broker in a
+rehearsal harness. Its opt-in and gate callbacks are test controls, not trading
+authorization or proof of authenticated demo account / distributed lease state.
 
 Implemented:
 
@@ -31,7 +33,7 @@ Implemented:
 Not implemented or enabled:
 
 - No exchange writes, actual demo order, live protective-order collection/repair,
-  cancellation of an unfilled remainder, emergency reduce-only exit, automatic
+  actual cancellation of an unfilled remainder, emergency reduce-only exit, automatic
   journal release, live strategy bridge or continuous demo runner. An offline sizing bridge now
   exists, as described below.
 - This journal is not a distributed account lock or a substitute for existing
@@ -140,3 +142,54 @@ runs when the shared strategy engine changes.
 PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_strategy_bridge.py' -v
 PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_demo_*.py' -v
 ```
+
+
+## Executor rehearsal integration
+
+`okx_demo_executor.py` adds a disabled-by-default asynchronous coordinator with
+three injected fake-exchange ports: place entry, lookup entry, cancel entry.
+It accepts only a broker explicitly marked `environment=demo` and
+`rehearsal_only=True`. No HTTP/SDK broker is supplied and no deployed service
+imports it. Do not label this as OKX demo-account acceptance or enable it with a
+real broker by merely changing these attributes.
+
+The flow reuses strategy sizing, persistent intent/dispatch fencing, monotonic
+order observation and independent protection assessment. A transaction durably
+reserves entry before any fake place call. It checks source expiry and the gate
+again immediately before calling the port; disabling during the gate blocks it.
+Acknowledgements require top-level success, exactly one individual success,
+matching client ID and a numeric exchange order ID. They are not fills. Rejected,
+malformed, timed-out or ambiguous responses remain unresolved, never auto-retry.
+A crash before receipt leaves the reservation intact. Fresh client-ID lookup
+must agree with any acknowledged order ID and the journal's intent parameters.
+A bad lookup invalidates prior cancellation freshness. Raw exception text and
+exchange response messages are not persisted or returned.
+
+Cancellation has its own durable one-shot reservation, requires a matching
+observed active order within five seconds, and checks the recovery gate again.
+A cancel acknowledgement does not update order state: a later lookup must prove
+cancellation or additional/full fills. Timeout or restart never grants another
+cancel attempt automatically. Canceled partial fills remain exposure needing
+independent native protection and position/fill reconciliation. The rehearsal
+does not cancel an algo, repair protection, emergency-close, unlock the journal
+or run a continuous strategy loop.
+
+Added acceptance: 21 asynchronous cases exercise complete synthetic flows,
+including source -> lot sizing -> intent -> fake receipt -> lookup -> partial
+fill -> independent protection assessment, cancel/fill races, crash/reopen,
+ambiguous receipt, disk failure, competing cancel reservations, slow/lost gates
+and disabled/live-broker rejection. Together with previous modules, 57 unittest
+cases passed locally (46 demo cases plus 11 strategy bridge cases). All exchange
+ports were fake; no keys, private account requests or orders were used.
+
+```sh
+PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_demo_*.py' -v
+PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_strategy_bridge.py' -v
+```
+
+Remaining before a genuine demo-account trial: a fixed demo-only authenticated
+transport, trusted complete/fresh account reader, actual lease/admission and
+daily-risk integration, fill-price risk checks, bounded protection repair and
+emergency-exit state machines, exit-fill audit/journal release, runtime packaging,
+and explicit authorization to place demo orders. The original no-exchange-trades
+instruction remains effective. Cloud resources and existing services are unchanged.
