@@ -26,7 +26,7 @@ TIMEOUT_SECONDS = 5.0
 DEMO_HEADERS = {"x-simulated-trading": "1"}
 ACK_FIELDS = frozenset({"sCode", "ordId", "clOrdId"})
 ORDER_FIELDS = frozenset({"ordId", "clOrdId", "instId", "state", "sz", "accFillSz",
-    "side", "posSide", "tdMode", "ordType", "avgPx", "fee", "feeCcy", "fillPx"})
+    "side", "posSide", "tdMode", "ordType", "avgPx", "fee", "feeCcy", "fillPx", "algoId", "algoClOrdId", "reduceOnly"})
 
 
 class DemoTransportError(RuntimeError):
@@ -116,6 +116,19 @@ class OKXDemoTransport:
             raise ValueError("Instrument not allowlisted")
         query = urlencode({"instId": symbol, "clOrdId": identifier(client_id)})
         return await self._send("GET", "/api/v5/trade/order?" + query)
+
+    async def lookup_algo(self, attached_client_id):
+        self._require_enabled()
+        if not isinstance(attached_client_id,str) or not re.fullmatch(r"sa[0-9a-f]{28}",attached_client_id):
+            raise ValueError("Tracked attached client identity required")
+        return await self._send("GET", "/api/v5/trade/order-algo?"+urlencode({"algoClOrdId":attached_client_id}))
+
+    async def lookup_child(self, symbol, order_id):
+        self._require_enabled()
+        if (symbol not in SYMBOLS or not isinstance(order_id,str)
+                or not re.fullmatch(r"[1-9][0-9]{0,39}",order_id)):
+            raise ValueError("Tracked child identity required")
+        return await self._send("GET", "/api/v5/trade/order?"+urlencode({"instId":symbol,"ordId":order_id}))
 
     async def cancel_entry(self, body, headers):
         self._require_enabled()

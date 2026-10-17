@@ -5,6 +5,7 @@ from okx_risk import SYMBOLS
 ALGO_TYPES = ("conditional", "oco", "trigger", "move_order_stop", "chase")
 DETAIL_FIELDS = frozenset({"ccy", "eq", "availEq", "availBal", "cashBal", "uTime"})
 SCHEMAS = {
+    "/api/v5/trade/order-algo": (1, frozenset({"algoId", "algoClOrdId", "instId", "instType", "state", "ordType", "sz", "side", "posSide", "tdMode", "reduceOnly", "closeFraction", "slTriggerPx", "slTriggerPxType", "slOrdPx", "tpTriggerPx", "tpTriggerPxType", "tpOrdPx", "ordIdList", "subAlgoIdList"})),
     "/api/v5/account/bills": (100, frozenset({"billId", "ts", "type", "subType", "ordId", "tradeId", "instId", "instType", "ccy", "pnl", "fee", "balChg", "sz", "px"})),
     "/api/v5/account/config": (1, frozenset({"uid", "posMode", "acctLv", "perm"})),
     "/api/v5/account/balance": (1, frozenset({"details"})),
@@ -62,6 +63,12 @@ def safe_row(row, fields):
             if not isinstance(value, list) or len(value) > 100:
                 raise ValueError("Malformed nested response")
             safe[key] = [safe_row(item, nested_fields) for item in value]
+        elif key in {"ordIdList", "subAlgoIdList"}:
+            if (not isinstance(value,list) or len(value)>10
+                    or any(not isinstance(item,str) or not item.isascii() or not item.isdigit()
+                           or not 1<=len(item)<=40 or item.startswith("0") for item in value)):
+                raise ValueError("Malformed child identities")
+            safe[key]=list(value)
         elif key == "reduceOnly" and type(value) is bool:
             safe[key] = value
         elif isinstance(value, str) and len(value) <= 128:

@@ -35,6 +35,34 @@ def group(evidence, name, snapshot, now):
     return value['rows'][0]
 
 
+def validate_lineage(body, entry, evidence, snapshot, now, scope):
+    if (evidence.get('demo_verified') is not True or evidence.get('account_scope') != scope):
+        raise ValueError('Same trusted demo account required')
+    algo=group(evidence,'algo',snapshot,now)
+    child=group(evidence,'child',snapshot,now)
+    bracket=body['attachAlgoOrds'][0]
+    opposite='sell' if body['side']=='buy' else 'buy'
+    algo_id, child_id = ident(algo.get('algoId')), ident(child.get('ordId'))
+    if (algo.get('algoClOrdId') != bracket['attachAlgoClOrdId']
+            or algo.get('state') != 'effective' or algo.get('ordType') != 'oco'
+            or algo.get('ordIdList') != [child_id] or algo.get('subAlgoIdList',[]) != []
+            or algo.get('closeFraction','') != '' or algo.get('instType') != 'SWAP'
+            or number(algo.get('sz')) != entry.filled
+            or any(algo.get(k) != v for k,v in dict(instId=body['instId'],side=opposite,posSide='net',tdMode='isolated').items())
+            or not truth(algo.get('reduceOnly'))
+            or any(algo.get(k) != bracket[k] for k in ('tpOrdPx','slOrdPx','tpTriggerPxType','slTriggerPxType'))
+            or any(number(algo.get(k)) != Decimal(bracket[k]) for k in ('tpTriggerPx','slTriggerPx'))):
+        raise ValueError('Unsupported or mismatched protective lineage')
+    if (child_id==entry.order_id or child.get('algoId') != algo_id
+            or child.get('algoClOrdId') != bracket['attachAlgoClOrdId']
+            or child.get('state') != 'filled' or child.get('ordType') != 'market'
+            or not truth(child.get('reduceOnly'))
+            or number(child.get('sz')) != entry.filled or number(child.get('accFillSz')) != entry.filled
+            or any(child.get(k) != v for k,v in dict(instId=body['instId'],side=opposite,posSide='net',tdMode='isolated').items())):
+        raise ValueError('Child not fully filled or not attributable to protective algo')
+    return child_id,algo_id,opposite
+
+
 class DemoClosedTradeAuditor(DemoFillAuditor):
     def __init__(self, authority):
         super().__init__(authority)
@@ -47,31 +75,7 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
         self.db.execute('INSERT INTO demo_close_context VALUES(1,?)',(spec_digest(snapshot['instrument']),))
 
     def _lineage(self, body, entry, evidence, snapshot, now):
-        if (evidence.get('demo_verified') is not True or evidence.get('account_scope') != self.authority.scope):
-            raise ValueError('Same trusted demo account required')
-        algo=group(evidence,'algo',snapshot,now)
-        child=group(evidence,'child',snapshot,now)
-        bracket=body['attachAlgoOrds'][0]
-        opposite='sell' if body['side']=='buy' else 'buy'
-        algo_id, child_id = ident(algo.get('algoId')), ident(child.get('ordId'))
-        if (algo.get('algoClOrdId') != bracket['attachAlgoClOrdId']
-                or algo.get('state') != 'effective' or algo.get('ordType') != 'oco'
-                or algo.get('ordIdList') != [child_id] or algo.get('subAlgoIdList',[]) != []
-                or algo.get('closeFraction','') != '' or algo.get('instType') != 'SWAP'
-                or number(algo.get('sz')) != entry.filled
-                or any(algo.get(k) != v for k,v in dict(instId=body['instId'],side=opposite,posSide='net',tdMode='isolated').items())
-                or not truth(algo.get('reduceOnly'))
-                or any(algo.get(k) != bracket[k] for k in ('tpOrdPx','slOrdPx','tpTriggerPxType','slTriggerPxType'))
-                or any(number(algo.get(k)) != Decimal(bracket[k]) for k in ('tpTriggerPx','slTriggerPx'))):
-            raise ValueError('Unsupported or mismatched protective lineage')
-        if (child_id==entry.order_id or child.get('algoId') != algo_id
-                or child.get('algoClOrdId') != bracket['attachAlgoClOrdId']
-                or child.get('state') != 'filled' or child.get('ordType') != 'market'
-                or not truth(child.get('reduceOnly'))
-                or number(child.get('sz')) != entry.filled or number(child.get('accFillSz')) != entry.filled
-                or any(child.get(k) != v for k,v in dict(instId=body['instId'],side=opposite,posSide='net',tdMode='isolated').items())):
-            raise ValueError('Child not fully filled or not attributable to protective algo')
-        return child_id,algo_id,opposite
+        return validate_lineage(body,entry,evidence,snapshot,now,self.authority.scope)
 
     def audit_closed(self, snapshot, evidence):
         """Commit immutable trading P&L before funding. Never grants readiness."""
@@ -91,6 +95,18 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
                 if (snapshot['pending_orders'] or snapshot['pending_algos']
                         or any(number(p.get('pos'),allow_negative=True) != 0 for p in snapshot['positions'])):
                     raise ValueError('Flat account and complete protective cleanup required')
+                if "entry" in evidence:
+                    if evidence.get("demo_verified") is not True or evidence.get("account_scope")!=self.authority.scope:
+                        raise ValueError("Same verified demo account required")
+                    incoming_entry=group(evidence,"entry",snapshot,now)
+                    client_id=incoming_entry.get("clOrdId")
+                    receipt=self.db.execute("SELECT exchange_order_id,entry_status FROM demo_execution WHERE id=?",(client_id,)).fetchone()
+                    if (not receipt or receipt[1]=="blocked_before_send"
+                            or (receipt[0] is not None and receipt[0]!=incoming_entry.get("ordId"))):
+                        raise ValueError("Entry receipt identity mismatch")
+                    self.authority.journal._observe_in_transaction(client_id,incoming_entry)
+                    self.db.execute("UPDATE demo_execution SET observed_at_ms=?,exchange_order_id=COALESCE(exchange_order_id,?) WHERE id=?",
+                        (evidence["entry"]["received_at_ms"],ident(incoming_entry.get("ordId")),client_id))
                 owned=self._owned_orders(snapshot,now)
                 if len(owned) != 1:
                     raise ValueError('Exactly one owned entry supported')

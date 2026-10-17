@@ -588,3 +588,50 @@ settlement ledger and publishes funding-inclusive loss risk exactly once.
 Selected regression passed **214 tests and 265 subtests** locally. No real OKX
 account reads, keys, orders/cancels, GCP resources or billing were accessed or
 changed during this implementation. Actual account acceptance remains pending.
+
+## Fixed GET protective-close details and atomic journal ingestion
+
+`okx_demo_close_reader.py` queries the tracked entry by strategy client ID, the
+attached native algo by its planned attached client ID and its sole child by
+exchange order ID. These are fixed GET endpoints using the existing default-off
+demo transport. Caller-supplied URLs, write operations, credential discovery and
+new runtime deployment are not added. Algo responses retain a bounded list of
+strict numeric child IDs. Child order responses retain `algoId`, `algoClOrdId`
+and reduce-only status; an empty child `clOrdId` is kept unchanged.
+
+The reader validates the configured account before any detail/amount read,
+collects two stable entry/algo/child passes, then repeats the entire account
+snapshot. Account data and detail rows must remain equal. The entry must be
+fully filled and agree with its planned client identity, direction, mode and
+size, plus a known acknowledgement order ID if supplied. A single child must
+match the algo in both directions. The same `validate_lineage` implementation
+is now shared with the durable close auditor, so trigger prices, reduce-only
+market exits and child identity checks cannot drift between components.
+Split children, spawned algos, active/partial/failed orders, foreign lineage and
+ambiguous detail results fail closed. Both detail passes are bounded by the
+whole five-second scan. Evidence retains the first pass's request-start times;
+no timestamp is refreshed just because scanning completed. Failure or external
+cancellation clears cached successes. Account snapshots continue to report
+`fill_audit_ready=False`; a read-only key is never upgraded to trade permission.
+
+`DemoClosedTradeAuditor.audit_closed` can consume this bundle directly. Its
+optional `entry` evidence is validated and persisted INSIDE the same current-owner
+SQLite transaction as fill inserts and the immutable close record. The shared
+journal observation primitive retains all previous identity/quantity/monotonic
+state checks. The public observation wrapper retains its existing transaction
+behavior. A failed close rolls back the new entry observation and new fills;
+a stale lease owner cannot ingest either. A previously uncertain receipt can
+be resolved through a matching fresh lookup without resubmission, while a known
+receipt order ID cannot be replaced. No readiness receipt or intent release is
+issued by successful close ingestion.
+
+Acceptance: 15 new intercepted HTTP tests cover fixed request correlation,
+UID/default-off gates, empty child client IDs, split/foreign/partial children,
+changed protection parameters, two-pass/account changes, response failures,
+invalid queries, permission preservation, expiry/timeout/cancellation, atomic
+rollback and stale-owner fencing. The GET reader bundle feeds the durable close
+ledger without needing the rehearsal-only executor to perform a real read.
+Selected regression passed **229 tests and 296 subtests** locally. No real
+account reads, credential access, order/cancel request, GCP resource or billing
+change was performed. Actual account compatibility, multi-intent archival and
+release, cross-day settlement and deployed runtime integration remain pending.

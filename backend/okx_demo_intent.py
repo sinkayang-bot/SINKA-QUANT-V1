@@ -115,33 +115,38 @@ class DemoIntentStore:
         if changed != 1:
             raise ValueError("Unknown or already dispatched intent; reconcile, never retry")
 
+    def _observe_in_transaction(self, client_id, row):
+        if not self.db.in_transaction:
+            raise ValueError("Atomic observation transaction required")
+        record = self.db.execute(
+            "SELECT plan,dispatched,snapshot FROM demo_intent WHERE id=?", (client_id,)).fetchone()
+        if not record or record[1] != 1:
+            raise ValueError("Dispatch reservation required")
+        body = json.loads(record[0])["body"]
+        current = parse_order(row)
+        if (current.client_order_id != client_id or current.instrument != body["instId"]
+                or current.requested != Decimal(body["sz"])
+                or row.get("side") != body["side"] or row.get("posSide") != "net"
+                or row.get("tdMode") != "isolated" or row.get("ordType") != "market"):
+            raise ValueError("Observed order does not match intent")
+        if ((current.state == "filled" and current.filled != current.requested)
+                or (current.state == "live" and current.filled != 0)
+                or (current.state == "partially_filled" and
+                    not 0 < current.filled < current.requested)):
+            raise ValueError("Inconsistent order state and fills")
+        if record[2]:
+            reconcile(parse_order(json.loads(record[2])), row)
+        # Store only known fields, never arbitrary response/error data.
+        safe = {key: row[key] for key in
+                ("ordId", "clOrdId", "instId", "state", "sz", "accFillSz",
+                 "side", "posSide", "tdMode", "ordType")}
+        self.db.execute("UPDATE demo_intent SET snapshot=? WHERE id=?",
+                        (json.dumps(safe, sort_keys=True), client_id))
+
     def observe(self, client_id, row):
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            record = self.db.execute(
-                "SELECT plan,dispatched,snapshot FROM demo_intent WHERE id=?", (client_id,)).fetchone()
-            if not record or record[1] != 1:
-                raise ValueError("Dispatch reservation required")
-            body = json.loads(record[0])["body"]
-            current = parse_order(row)
-            if (current.client_order_id != client_id or current.instrument != body["instId"]
-                    or current.requested != Decimal(body["sz"])
-                    or row.get("side") != body["side"] or row.get("posSide") != "net"
-                    or row.get("tdMode") != "isolated" or row.get("ordType") != "market"):
-                raise ValueError("Observed order does not match intent")
-            if ((current.state == "filled" and current.filled != current.requested)
-                    or (current.state == "live" and current.filled != 0)
-                    or (current.state == "partially_filled" and
-                        not 0 < current.filled < current.requested)):
-                raise ValueError("Inconsistent order state and fills")
-            if record[2]:
-                reconcile(parse_order(json.loads(record[2])), row)
-            # Store only known fields, never arbitrary response/error data.
-            safe = {key: row[key] for key in
-                    ("ordId", "clOrdId", "instId", "state", "sz", "accFillSz",
-                     "side", "posSide", "tdMode", "ordType")}
-            self.db.execute("UPDATE demo_intent SET snapshot=? WHERE id=?",
-                            (json.dumps(safe, sort_keys=True), client_id))
+            self._observe_in_transaction(client_id,row)
             self.db.execute("COMMIT")
         except Exception:
             self.db.execute("ROLLBACK")
