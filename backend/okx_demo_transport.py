@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 import httpx
 from okx_risk import SYMBOLS
-from okx_demo_reads import SCHEMAS, read_route, safe_row
+from okx_demo_reads import SCHEMAS, read_route, safe_row, bill_route
 
 ORIGIN = "https://www.okx.com"
 MAX_RESPONSE_BYTES = 65536
@@ -131,6 +131,11 @@ class OKXDemoTransport:
         self._require_enabled()
         path = read_route(kind, symbol=symbol, algo_type=algo_type, after=after)
         return await self._send("GET", path)
+
+    async def read_bills(self, begin_ms, end_ms, *, after=None):
+        """GET-only complete USDT interval; fixed endpoint and filters."""
+        self._require_enabled()
+        return await self._send("GET", bill_route(begin_ms, end_ms, after=after))
 
     async def _send(self, method, path, body=None, *, deadline_ms=None):
         self._require_enabled()

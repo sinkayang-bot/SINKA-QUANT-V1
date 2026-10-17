@@ -5,6 +5,7 @@ from okx_risk import SYMBOLS
 ALGO_TYPES = ("conditional", "oco", "trigger", "move_order_stop", "chase")
 DETAIL_FIELDS = frozenset({"ccy", "eq", "availEq", "availBal", "cashBal", "uTime"})
 SCHEMAS = {
+    "/api/v5/account/bills": (100, frozenset({"billId", "ts", "type", "subType", "ordId", "tradeId", "instId", "instType", "ccy", "pnl", "fee", "balChg", "sz", "px"})),
     "/api/v5/account/config": (1, frozenset({"uid", "posMode", "acctLv", "perm"})),
     "/api/v5/account/balance": (1, frozenset({"details"})),
     "/api/v5/account/leverage-info": (2, frozenset({"instId", "mgnMode", "posSide", "lever"})),
@@ -68,3 +69,16 @@ def safe_row(row, fields):
         else:
             raise ValueError("Malformed response value")
     return safe
+
+
+def bill_route(begin_ms, end_ms, *, after=None):
+    """One account-wide currency interval; no instrument/type filters."""
+    if (type(begin_ms) is not int or type(end_ms) is not int
+            or not 0 < begin_ms <= end_ms <= 253402300799000 or end_ms-begin_ms>604800000):
+        raise ValueError("Bounded bill interval required")
+    params={"ccy":"USDT","begin":str(begin_ms),"end":str(end_ms),"limit":"100"}
+    if after is not None:
+        if not isinstance(after,str) or not after.isascii() or not after.isdigit() or not 1<=len(after)<=40 or after.startswith("0"):
+            raise ValueError("Invalid bill cursor")
+        params["after"]=after
+    return "/api/v5/account/bills?"+urlencode(params)

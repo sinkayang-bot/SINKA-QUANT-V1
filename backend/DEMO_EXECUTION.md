@@ -537,3 +537,54 @@ snapshot checks verify currency cash is retained separately and changes reject.
 Selected regression passed **197 tests and 244 subtests** locally. No account
 credentials, actual account reads, order/cancel requests, GCP deployment or
 billing change were involved.
+
+## Fixed GET bill adapter and snapshot/settlement integration
+
+`okx_demo_bill_reader.py` implements the production-shaped read adapter for the
+previously offline bill contract. It accepts only `DemoSnapshotReader` using the
+existing default-off fixed-host demo transport. `read_bills` signs a fixed
+`GET /api/v5/account/bills` request with `ccy=USDT`, explicit `begin`/`end`,
+`limit=100` and optional strict numeric `after`. No instrument/type filter,
+arbitrary endpoint, live mode, new POST operation, credential discovery or
+runtime deployment is added. Each response uses the existing bounded/sanitized
+GET schema; unneeded upstream fields and messages are discarded.
+
+Collecting a bundle first verifies the configured UID and net/account mode via
+an entire two-pass account snapshot. It then scans the fixed account-wide bill
+interval twice and collects another two-pass account snapshot. Both complete
+account results (including cash, equity, inventory, permissions, instrument and
+recent fills) must match after removing local read timestamps. UID/config is
+rechecked by the second snapshot reader; a wrong initial UID prevents both bill
+and amount reads. Currency cash must be available. A read-only key can produce
+diagnostics, but its snapshot retains `order_permission_verified=False`.
+
+The cutoff is the FIRST account snapshot's start, not a fresh timestamp assigned
+after a slow scan. Both bill passes cover the stored begin through that same
+cutoff. Pagination enforces strictly decreasing unique IDs within/across pages,
+row timestamps inside the requested interval, a short terminal page, a maximum
+of 500 rows and six requests per pass. Exactly 100 or 500 rows therefore require
+an additional terminal empty page. Baselines older than the recent seven-day
+endpoint retention are rejected before requests. The whole bundle has a
+five-second timeout and clock-age bound. Failure/cancellation clears cached
+bundle and reader success; cancellation propagates normally. Returned values
+and cached success are separately deep copied.
+
+The result contains `snapshot` and `bills`, directly consumable by
+`DemoSettlementAuditor.settle`. A fresh individual owned-entry observation is
+still needed independently; bill reads do not authorize an exchange request.
+Snapshot `fill_audit_ready` and `fill_history_complete` remain false, and
+settlement does not release an intent. This adapter currently reads bills only;
+native algo/child detail read adapters, archival/multi-intent release, cross-day
+settlement and deployed runtime wiring remain outstanding. Stable snapshots
+and bill passes are bounded observations, not an atomic exchange transaction
+or a guarantee against future late postings.
+
+Acceptance: 17 new tests intercept every HTTP request. They cover UID checks
+before amounts, permission preservation, account changes, complete 100/500-row
+pagination, overflow/duplicates/looped cursors, interval/schema bounds, double-pass
+changes, default-off behavior, HTTP errors/redirects, privacy, timeout and external
+cancellation. An intercepted HTTP bundle also feeds the persisted close and
+settlement ledger and publishes funding-inclusive loss risk exactly once.
+Selected regression passed **214 tests and 265 subtests** locally. No real OKX
+account reads, keys, orders/cancels, GCP resources or billing were accessed or
+changed during this implementation. Actual account acceptance remains pending.
