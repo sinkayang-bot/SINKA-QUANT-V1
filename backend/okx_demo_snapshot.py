@@ -113,9 +113,10 @@ class DemoSnapshotReader:
         raise ValueError("Missing terminal inventory page")
 
     async def _algos(self):
-        async with asyncio.TaskGroup() as group:
-            tasks = [group.create_task(self._scan("algos", algo_type=kind)) for kind in ALGO_TYPES]
-        rows = [row for task in tasks for row in task.result()]
+        # Serial type scans also work reliably outside a pooled full snapshot.
+        rows=[]
+        for kind in ALGO_TYPES:
+            rows.extend(await self._scan('algos',algo_type=kind))
         if len(rows) > 500 or len({row["algoId"] for row in rows}) != len(rows):
             raise ValueError("Ambiguous algo inventory")
         return canonical(rows)
@@ -175,10 +176,11 @@ class DemoSnapshotReader:
         try:
             start = timestamp(self.clock())
             async with asyncio.timeout(5):
-                # Verify the configured account before reading any account amounts.
-                config = self._config(await self._read("config"))
-                first = await self._pass(config)
-                second = await self._pass()
+                async with self.transport.read_session():
+                    # Verify the configured account before reading any account amounts.
+                    config = self._config(await self._read("config"))
+                    first = await self._pass(config)
+                    second = await self._pass()
             end = timestamp(self.clock())
             if first != second or not 0 <= end - start <= 5000:
                 raise ValueError("Account changed or scan expired")

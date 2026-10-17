@@ -5,6 +5,7 @@ Tests inject httpx.MockTransport; they never contact an exchange.
 """
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -99,12 +100,36 @@ class OKXDemoTransport:
         self.rehearsal_only = isinstance(transport, httpx.MockTransport)
         self._transport = transport
         self._clock = clock or (lambda: int(time.time() * 1000))
+        self._read_client = None
+        self._read_slots = None
+        self._read_active = False
 
     def _require_enabled(self):
         if not self.enabled:
             raise DemoTransportError("Demo requests are disabled by default")
         if not isinstance(self.credentials, DemoCredentials):
             raise DemoTransportError("Demo credentials are not configured")
+
+    @asynccontextmanager
+    async def read_session(self):
+        """One bounded snapshot pool. At most two concurrent GETs, no writes."""
+        self._require_enabled()
+        if self._read_active:
+            raise DemoTransportError('A read session is already active')
+        self._read_active=True
+        try:
+            limits=httpx.Limits(max_connections=2,max_keepalive_connections=2)
+            transport=self._transport if self._transport is not None else httpx.AsyncHTTPTransport(
+                retries=0,trust_env=False,limits=limits)
+            async with httpx.AsyncClient(transport=transport,timeout=TIMEOUT_SECONDS,
+                    limits=limits,follow_redirects=False,trust_env=False) as client:
+                self._read_client=client
+                self._read_slots=asyncio.Semaphore(2)
+                yield
+        finally:
+            self._read_client=None
+            self._read_slots=None
+            self._read_active=False
 
     async def place_entry(self, body, headers, *, deadline_ms=None):
         self._require_enabled()
@@ -153,6 +178,17 @@ class OKXDemoTransport:
         return await self._send("GET", bill_route(begin_ms, end_ms, after=after))
 
     async def _send(self, method, path, body=None, *, deadline_ms=None):
+        if self._read_client is not None:
+            if method!='GET' or body is not None or deadline_ms is not None:
+                raise DemoTransportError('Read sessions permit GET only')
+            client,slots=self._read_client,self._read_slots
+            async with slots:
+                if self._read_client is not client:
+                    raise DemoTransportError('Read session has ended')
+                return await self._send_request(method,path,body,deadline_ms=deadline_ms,client=client)
+        return await self._send_request(method,path,body,deadline_ms=deadline_ms)
+
+    async def _send_request(self, method, path, body=None, *, deadline_ms=None,client=None):
         self._require_enabled()
         # No caller-supplied URL, auth headers, redirect, proxy config or retry policy.
         root = path.partition("?")[0]
@@ -174,20 +210,28 @@ class OKXDemoTransport:
             if type(deadline) is not int or not now < deadline <= now + 20000:
                 raise ValueError("Invalid or expired entry deadline")
             headers["expTime"] = str(min(deadline, now + 1500))
+        async def receive(active_client):
+            # Do not reuse API cookies between authenticated requests.
+            active_client.cookies.clear()
+            async with active_client.stream(method, ORIGIN + path, headers=headers,
+                    content=encoded.encode() if body is not None else None) as response:
+                if response.status_code != 200:
+                    raise DemoTransportError("Demo request failed; reconcile before any retry",http_status=response.status_code)
+                payload = bytearray()
+                async for chunk in response.aiter_bytes():
+                    payload.extend(chunk)
+                    if len(payload) > (MAX_READ_RESPONSE_BYTES if method == "GET" and root in SCHEMAS else MAX_RESPONSE_BYTES):
+                        raise ValueError("Response exceeds bound")
+            return payload
         try:
-            transport = self._transport if self._transport is not None else httpx.AsyncHTTPTransport(retries=0, trust_env=False)
             async with asyncio.timeout(TIMEOUT_SECONDS):
-                async with httpx.AsyncClient(transport=transport, timeout=TIMEOUT_SECONDS,
-                        follow_redirects=False, trust_env=False) as client:
-                    async with client.stream(method, ORIGIN + path, headers=headers,
-                            content=encoded.encode() if body is not None else None) as response:
-                        if response.status_code != 200:
-                            raise DemoTransportError("Demo request failed; reconcile before any retry",http_status=response.status_code)
-                        payload = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            payload.extend(chunk)
-                            if len(payload) > (MAX_READ_RESPONSE_BYTES if method == "GET" and root in SCHEMAS else MAX_RESPONSE_BYTES):
-                                raise ValueError("Response exceeds bound")
+                if client is None:
+                    transport=self._transport if self._transport is not None else httpx.AsyncHTTPTransport(retries=0,trust_env=False)
+                    async with httpx.AsyncClient(transport=transport,timeout=TIMEOUT_SECONDS,
+                            follow_redirects=False,trust_env=False) as private_client:
+                        payload=await receive(private_client)
+                else:
+                    payload=await receive(client)
             parsed = json.loads(payload)
             max_rows, fields = SCHEMAS[root] if method == "GET" and root in SCHEMAS else (1, ORDER_FIELDS if method == "GET" else ACK_FIELDS)
             if (not isinstance(parsed, dict) or not isinstance(parsed.get("code"), str)
@@ -209,6 +253,11 @@ class OKXDemoReadTransport(OKXDemoTransport):
         if method!='GET' or body is not None or deadline_ms is not None:
             raise DemoTransportError('Reconciliation transport permits GET only')
         return await super()._send(method,path)
+
+    async def _send_request(self,method,path,body=None,*,deadline_ms=None,client=None):
+        if method!='GET' or body is not None or deadline_ms is not None:
+            raise DemoTransportError('Reconciliation transport permits GET only')
+        return await super()._send_request(method,path,body,deadline_ms=deadline_ms,client=client)
 
     async def place_entry(self,*args,**kwargs):
         raise DemoTransportError('Reconciliation transport cannot place orders')
