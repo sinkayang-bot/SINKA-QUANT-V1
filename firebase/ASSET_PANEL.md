@@ -9,10 +9,23 @@ The final probe reported `public_health_verified`, `missing_token_denied`,
 all true, with `trading_enabled: false`.
 
 The public probe's `okx_connection_verified: false` is expected: it intentionally
-does not read private amounts or run an authenticated exchange scan. The next
-step is the owner's manual asset query from the deployed dashboard. Actual asset
-data and its expiry/logout clearing still require owner browser verification;
-deployment success alone is not recorded as end-to-end asset acceptance.
+does not read private amounts or run an authenticated exchange scan.
+
+## Owner browser asset-query verification
+
+The owner's dashboard screenshot received on **2026-10-17 09:26:37,
+Asia/Taipei** shows the successful demo asset query message and a completion
+timestamp of **09:25:51**. The USD equity summary and currency, position and
+standard pending-order sections render through the authenticated route.
+
+This verifies the manual owner login -> asset API -> read-only OKX adapter ->
+frontend validation/rendering path for that request. No private amounts, currency
+inventory, position contents, order contents or screenshot are recorded in this
+public repository. It does not establish ongoing connection health, exercise
+every possible populated-table case, or authorize a trade.
+
+Automatic clearing after 30 seconds and clearing on logout have automated unit
+coverage; their live owner-browser behavior has not yet been separately confirmed.
 
 ## Contract and boundaries
 
