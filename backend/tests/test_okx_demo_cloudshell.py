@@ -52,6 +52,7 @@ def test_cloud_error_details_are_sanitized(monkeypatch):
 
 def test_binding_reads_are_structurally_get_only(monkeypatch):
     fixture=Fixture()
+    fixture.balance['details'][0]['cashBal']='10000'
     def transport(creds,**opts): return fixture.reader().transport
     monkeypatch.setattr(setup,'OKXDemoReadTransport',transport)
     binding,flat=asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
@@ -132,3 +133,37 @@ def test_ephemeral_or_unseparated_root_filesystem_is_not_proof_of_persistence(mo
     monkeypatch.setattr(setup.Path,'read_text',lambda path,*a,**k:mount if str(path)=='/proc/self/mountinfo' else original(path,*a,**k))
     with pytest.raises(setup.SetupBlocked,match='persistent_local_disk_not_verified'):
         setup.persistent_storage(tmp_path/'sinka-demo-trial')
+
+
+@pytest.mark.parametrize('change,reason',[
+    ('position_mode','demo_net_position_mode_required'),
+    ('account_level','demo_futures_or_multi_currency_account_required'),
+    ('leverage','demo_isolated_leverage_1_to_3_required'),
+    ('balance','demo_usdt_balance_missing_or_invalid'),
+    ('instrument','demo_instrument_specification_unsupported'),
+])
+def test_diagnostic_identifies_supported_configuration_blocker_without_private_values(monkeypatch,change,reason):
+    fixture=Fixture()
+    fixture.balance['details'][0]['cashBal']='10000'
+    if change=='position_mode': fixture.config['posMode']='long_short_mode'
+    if change=='account_level': fixture.config['acctLv']='1'
+    if change=='leverage': fixture.leverage[0]['lever']='10'
+    if change=='balance': fixture.balance['details']=[]
+    if change=='instrument': fixture.instrument['maxStopSz']=''
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('synthetic-private-key','test','test')))
+    assert str(caught.value)==reason
+    assert 'synthetic-private-key' not in str(caught.value)
+    assert all(request.method=='GET' for request in fixture.calls)
+
+
+def test_config_http_failure_exposes_only_status_not_headers_or_body(monkeypatch):
+    import httpx
+    fixture=Fixture()
+    fixture.response_override=lambda request:httpx.Response(401,json={'code':'50113','msg':'private-provider-message'})
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('synthetic-private-key','test','test')))
+    assert str(caught.value)=='demo_config_connection_failed_http_401'
+    assert 'private' not in str(caught.value)

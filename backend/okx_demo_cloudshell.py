@@ -16,9 +16,11 @@ import subprocess
 import time
 
 from okx_demo_snapshot import DemoSnapshotReader,digits
-from okx_demo_transport import DemoCredentials,OKXDemoReadTransport
+from okx_demo_transport import DemoCredentials,OKXDemoReadTransport,DemoTransportError
 from okx_demo_trading_worker import execute
 from okx_reconcile import number
+from okx_risk import positive
+from okx_instruments import instrument_spec
 
 PROJECT='sinka-quant'
 SECRET_NAMES=('OKX_DEMO_TRADE_API_KEY','OKX_DEMO_TRADE_API_SECRET','OKX_DEMO_TRADE_API_PASSPHRASE')
@@ -101,16 +103,65 @@ def persistent_storage(root):
 async def account_check(creds,binding=None):
     clock=lambda:int(time.time()*1000)
     transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
+    stage='demo_config_connection_failed'
     try:
         config=await transport.account_read('config')
-        if config.get('code')!='0' or len(config.get('data',[]))!=1: raise ValueError()
+        code=config.get('code')
+        if code!='0':
+            suffix=code if isinstance(code,str) and re.fullmatch(r'[0-9]{1,8}',code) else 'unknown'
+            raise SetupBlocked('demo_config_api_rejected_code_'+suffix)
+        if len(config.get('data',[]))!=1: raise SetupBlocked('demo_config_response_invalid')
         row=config['data'][0]
+        stage='demo_config_identity_invalid'
         uid=digits(row.get('uid'))
         scope='okx-demo:'+hashlib.sha256(uid.encode()).hexdigest()[:24]
         expected={'version':1,'uid':uid,'account_scope':scope,'symbol':SYMBOL}
         if binding is not None and binding!=expected:
             raise SetupBlocked('pinned_demo_account_mismatch')
+        if row.get('posMode')!='net_mode':
+            raise SetupBlocked('demo_net_position_mode_required')
+        if row.get('acctLv') not in {'2','3'}:
+            raise SetupBlocked('demo_futures_or_multi_currency_account_required')
         reader=DemoSnapshotReader(transport,account_scope=scope,expected_uid=uid,symbol=SYMBOL,clock=clock)
+        stage='demo_api_permission_configuration_invalid'
+        mode=reader._config([row])
+        if mode['order_permission_verified'] is not True:
+            raise SetupBlocked('demo_trade_permission_missing')
+        stage='demo_isolated_leverage_read_failed'
+        leverage=await reader._read('leverage',symbol=SYMBOL)
+        stage='demo_isolated_leverage_1_to_3_required'
+        if (len(leverage)!=1 or leverage[0].get('instId')!=SYMBOL
+                or leverage[0].get('mgnMode')!='isolated' or leverage[0].get('posSide')!='net'):
+            raise ValueError()
+        lever=positive(leverage[0].get('lever'),'leverage')
+        if lever!=lever.to_integral_value() or not 1<=lever<=3: raise ValueError()
+        stage='demo_usdt_balance_read_failed'
+        balances=await reader._read('balance')
+        stage='demo_usdt_balance_missing_or_invalid'
+        if len(balances)!=1 or len(balances[0].get('details',[]))!=1: raise ValueError()
+        detail=balances[0]['details'][0]
+        if detail.get('ccy')!='USDT': raise ValueError()
+        equity=positive(detail.get('eq'),'equity')
+        available=min(number(detail.get('availEq')),number(detail.get('availBal')))
+        if available>equity: raise ValueError()
+        # A cash baseline is mandatory for settlement; distinguish absent cash now.
+        number(detail.get('cashBal'),allow_negative=True)
+        stage='demo_instrument_read_failed'
+        instruments=await reader._read('instrument',symbol=SYMBOL)
+        stage='demo_instrument_specification_unsupported'
+        if len(instruments)!=1: raise ValueError()
+        instrument_spec(instruments[0])
+        positive(instruments[0].get('maxMktSz'),'market maximum')
+        positive(instruments[0].get('maxStopSz'),'stop maximum')
+        stage='demo_positions_inventory_invalid'
+        await reader._read('positions')
+        stage='demo_pending_orders_inventory_invalid'
+        await reader._scan('orders')
+        stage='demo_pending_algos_inventory_invalid'
+        await reader._algos()
+        stage='demo_recent_fills_inventory_invalid'
+        await reader._scan('fills')
+        stage='demo_full_snapshot_inconsistent_or_expired'
         snapshot=await reader.collect()
         if snapshot['order_permission_verified'] is not True:
             raise SetupBlocked('demo_trade_permission_missing')
@@ -119,8 +170,11 @@ async def account_check(creds,binding=None):
         if binding is None and not flat: raise SetupBlocked('first_binding_requires_flat_clean_account')
         return expected,flat
     except SetupBlocked: raise
+    except DemoTransportError as error:
+        suffix='_http_'+str(error.http_status) if error.http_status is not None else ''
+        raise SetupBlocked(stage+suffix) from None
     except Exception:
-        raise SetupBlocked('demo_account_mode_leverage_or_connection_check_failed') from None
+        raise SetupBlocked(stage) from None
 
 
 def prepare(root,creds,*,require_binding=False):

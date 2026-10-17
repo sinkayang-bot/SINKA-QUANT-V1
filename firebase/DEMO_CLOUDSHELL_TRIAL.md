@@ -32,6 +32,23 @@ python3 -m venv "$HOME/sinka-demo-venv"
 成功輸出 `phase: demo_account_verified`、`trade_permission_verified: true`、
 `persistent_storage_verified: true`、`orders_enabled: false`。不顯示 UID、資產或金鑰。
 
+若輸出 blocked，reason 會區分各個階段，不能把連線錯誤直接判定為金鑰錯誤：
+
+| reason | 意義 |
+| --- | --- |
+| `demo_net_position_mode_required` | 模擬帳戶需使用 net／買賣模式 |
+| `demo_futures_or_multi_currency_account_required` | 需支援的合約帳戶等級 2 或 3 |
+| `demo_trade_permission_missing` | 新金鑰尚無交易權限 |
+| `demo_isolated_leverage_1_to_3_required` | BTC-USDT-SWAP 逐倉槓桿資料不符合 1–3 倍／net 條件 |
+| `demo_usdt_balance_missing_or_invalid` | 模擬 USDT 資產、可用餘額或現金帳本欄位不完整 |
+| `demo_instrument_specification_unsupported` | 合約規格或市價／停損數量上限不支援 |
+| `demo_config_connection_failed_http_401` | 帳戶設定請求未通過 HTTP 驗證；檢查伺服器上新憑證是否為對應的一組，不公開其內容 |
+| `demo_full_snapshot_inconsistent_or_expired` | 各別讀取已通過，但完整雙次快照變動、過期或驗證未通過 |
+
+其他 `*_read_failed`／`*_inventory_invalid` 代表指定的只讀資料階段未通過。
+HTTP 狀態及數字 API code 可供診斷；回應原文、標頭及憑證不輸出。程式不會為了
+通過檢查而自行變更任何帳戶設定，也不會重新建立帳本或綁定。
+
 ## 通過檢查後才進行限時試跑
 
 使用已審查的程式版本，首次建立基線並允許策略自行等待新訊號：

@@ -30,7 +30,9 @@ ORDER_FIELDS = frozenset({"ordId", "clOrdId", "instId", "state", "sz", "accFillS
 
 
 class DemoTransportError(RuntimeError):
-    pass
+    def __init__(self,message,*,http_status=None):
+        super().__init__(message)
+        self.http_status=(http_status if type(http_status) is int and 100<=http_status<=599 else None)
 
 
 @dataclass(frozen=True)
@@ -180,7 +182,7 @@ class OKXDemoTransport:
                     async with client.stream(method, ORIGIN + path, headers=headers,
                             content=encoded.encode() if body is not None else None) as response:
                         if response.status_code != 200:
-                            raise ValueError("Unexpected response status")
+                            raise DemoTransportError("Demo request failed; reconcile before any retry",http_status=response.status_code)
                         payload = bytearray()
                         async for chunk in response.aiter_bytes():
                             payload.extend(chunk)
@@ -194,6 +196,8 @@ class OKXDemoTransport:
                 raise ValueError("Malformed response")
             rows = [safe_row(row, fields) for row in parsed["data"]]
             return {"code": parsed["code"], "data": rows}
+        except DemoTransportError:
+            raise
         except Exception:
             # Do not expose httpx's request object, headers, raw body or upstream msg.
             raise DemoTransportError("Demo request failed; reconcile before any retry") from None
