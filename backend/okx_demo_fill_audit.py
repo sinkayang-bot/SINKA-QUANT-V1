@@ -128,6 +128,9 @@ class DemoFillAuditor:
         self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
         return verified
 
+    def _baseline_metadata(self, snapshot):
+        pass  # Optional scoped audit extension, inside the baseline transaction.
+
     def bootstrap(self, snapshot, *, baseline_authorized=False):
         try:
             if baseline_authorized is not True:
@@ -151,6 +154,7 @@ class DemoFillAuditor:
                 anchor = max(fills, key=lambda k:int(fills[k]["billId"])) if fills else None
                 self.db.execute("INSERT INTO demo_fill_audit_meta VALUES(1,?,?,?,?,1)", (
                     self.authority.scope, snapshot["received_at_ms"], now, anchor))
+                self._baseline_metadata(snapshot)
                 verified = self._certify(snapshot, now, 1)
                 self.db.execute("COMMIT")
             except Exception:

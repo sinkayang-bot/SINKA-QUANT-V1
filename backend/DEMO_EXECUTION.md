@@ -415,3 +415,55 @@ fees, rollback, missing/excess fills, historical baseline separation, receipt
 binding and restart with retained fills. Selected regression passed **164 tests
 and 185 subtests** locally. No actual OKX account read or order/cancel request,
 credential retrieval, cloud deployment or billing change was performed.
+
+## Native OCO closed-trade audit (offline, before funding)
+
+`okx_demo_close_audit.py` extends the scoped fill auditor with an immutable
+closed-trade record. Construct `DemoClosedTradeAuditor` BEFORE flat-baseline
+bootstrap: its baseline hook stores original validated contract metadata in the
+same transaction. An existing baseline without that context is not retroactively
+populated from current metadata and cannot certify a close through this component.
+
+The supported subset is one fully filled entry, one effective fixed-size
+reduce-only OCO and one fully filled market child. Caller-supplied trusted demo
+algo and child detail groups must be fresh, complete, account-bound and received
+at or after the account scan started. Both directions of lineage are checked:
+the planned attached client ID identifies the algo, its `ordIdList` must contain
+exactly the child ID, and that child must identify the same algo and client ID.
+Stop/target, trigger basis, direction, isolated/net mode and quantities must
+match. Split child orders, spawned algos, partial exits, canceled partial entries,
+unknown fills and ambiguous evidence reject. Empty child `clOrdId` is supported;
+it is never invented as a correlation identity.
+
+The account must be flat with neither normal nor protective orders pending.
+Original instrument parameters must still match. The existing entry journal,
+bounded fill-window anchor and 60-second continuity checks remain mandatory.
+Each side's fills must total the known entry size exactly. Close fills cannot
+precede completion of entry. Weighted contract-price totals and original
+contract value determine signed gross P&L. Reported close-fill P&L must agree
+within 0.00000001 USDT; larger discrepancies fail closed. Every signed USDT fill
+fee is included once, including positive rebates. `trading_net_usdt` is gross
+plus signed entry/exit fees, **before funding and other account-bill adjustments**.
+It is not the account's complete net result.
+
+Fill inserts, trade record and continuity checkpoint commit atomically.
+Repetition is idempotent; previously stored fills and closed-trade totals cannot
+be rewritten. A reopened ledger retains the close and requires fresh current
+owner/order/detail evidence. Every close attempt invalidates entry readiness;
+success deliberately does not issue a readiness receipt, delete the intent or
+call `record_verified_close`. `new_entry_allowed`, `submission_enabled`,
+`funding_audited` and `account_bills_audited` remain false. Bill/funding audit,
+daily-risk close publication, authorized intent lifecycle release, production
+read adapters and deployed runtime integration remain outstanding.
+
+Official protocol reference: [OKX API guide](https://www.okx.com/docs-v5/en/),
+GET Order details, GET Algo order details (`ordIdList`, `algoId`, attached client
+ID linkage) and transaction details. This component consumes offline evidence;
+there is no new HTTP method, endpoint, credential access or deployment wiring.
+Actual demo-account response compatibility has not been accepted yet.
+
+Acceptance: 16 new synthetic close-audit tests cover long/short direction,
+losses, weighted fills, fees/rebates, wrong lineage/trigger parameters, partial
+and non-reducing children, cleanup, rollback, restart and immutable records.
+Selected regression passed **180 tests and 223 subtests** locally. No real
+account access or exchange order/cancel request was made.
