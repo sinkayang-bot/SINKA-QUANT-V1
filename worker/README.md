@@ -87,7 +87,8 @@ invented historical fill. No part of this lifecycle guarantees profitability.
 A separate [30-minute GCP VM trial proposal](VM_TRIAL.md) includes a default
 no-op deployment plan, source integrity checks and read-only cloud verification.
 Its original cost approval and startup verification are recorded there;
-cloud stop/start persistence acceptance remains pending.
+cloud stop/start persistence acceptance passed in the owner screenshot received
+2026-10-17 20:13 Asia/Taipei. This is bounded paper recovery, not exchange execution.
 
 ## Verification
 

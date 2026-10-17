@@ -137,8 +137,8 @@ ledger tests until paper trades occur in the cloud.
 The script waits up to five minutes for the new bootstrap, then stops the VM
 on failed/timed-out acceptance, retaining data. Output has
 `restart_acceptance_complete: true` only when all required evidence is present.
-The actual cloud stop/start test is pending operator execution; mocked gcloud
-and deterministic comparison tests are not represented as cloud acceptance.
+The actual cloud stop/start result is recorded below; mocked gcloud and
+deterministic comparison tests alone are not cloud acceptance.
 
 
 ## Observed cloud startup evidence
@@ -168,3 +168,15 @@ actual readable ledger counters, stop/start the same VM and run the original
 full comparison. This may perform two short starts in the existing trial
 budget; each retains the 30-minute provider STOP limit. No resources are
 created, disks reset, worker source changed or runtime bounds removed.
+
+
+## Observed restart evidence — 2026-10-17 20:13 Asia/Taipei
+
+Owner screenshot of the pinned bbb992a9 helper showed warmup of the stopped
+instance followed by stop/start of the same instance. The final report showed
+`same_vm`, `same_persistent_disk`, `new_boot_observed`, `checkpoint_not_reset`,
+`trade_history_not_reduced`, `fresh_public_quote_after_restart`, `worker_running`
+and `restart_acceptance_complete` all true; `trading_enabled` false. The
+30-minute provider STOP limit remained in effect. `recovered_position_flattened`
+was false, so this evidence does not verify recovery of an open position.
+No screenshot, private identifiers, addresses or account amounts are stored here.
