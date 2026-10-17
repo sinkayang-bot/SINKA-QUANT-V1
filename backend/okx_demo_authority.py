@@ -109,7 +109,7 @@ class DemoEntryAuthority:
     def _validate_snapshot(self, snapshot, now):
         if not isinstance(snapshot, dict) or snapshot.get("account_scope") != self.scope:
             raise ValueError("Account scope mismatch")
-        if not all(snapshot.get(k) is True for k in ("demo_verified", "complete", "fill_audit_ready", "monitor_healthy")):
+        if not all(snapshot.get(k) is True for k in ("demo_verified", "complete", "fill_audit_ready", "monitor_healthy", "order_permission_verified")):
             raise ValueError("Complete verified snapshot required")
         received = timestamp(snapshot.get("received_at_ms"))
         if self.acquired_at is None or received < self.acquired_at or not 0 <= now - received <= 5000:

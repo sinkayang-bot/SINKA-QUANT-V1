@@ -34,7 +34,7 @@ class DemoAuthorityTests(unittest.TestCase):
 
     def snapshot(self, **updates):
         return dict(account_scope="synthetic-v1", demo_verified=True, complete=True,
-            fill_audit_ready=True, monitor_healthy=True, received_at_ms=self.now,
+            fill_audit_ready=True, monitor_healthy=True, order_permission_verified=True, received_at_ms=self.now,
             position_mode="net_mode", isolated_leverage=3, equity_usdt="10000", available_usdt="10000",
             positions=[], pending_orders=[], pending_algos=[], symbol="BTC-USDT-SWAP",
             instrument=args()["instrument"]) | updates

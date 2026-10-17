@@ -17,9 +17,11 @@ from urllib.parse import urlencode
 
 import httpx
 from okx_risk import SYMBOLS
+from okx_demo_reads import SCHEMAS, read_route, safe_row
 
 ORIGIN = "https://www.okx.com"
 MAX_RESPONSE_BYTES = 65536
+MAX_READ_RESPONSE_BYTES = 1048576
 TIMEOUT_SECONDS = 5.0
 DEMO_HEADERS = {"x-simulated-trading": "1"}
 ACK_FIELDS = frozenset({"sCode", "ordId", "clOrdId"})
@@ -124,10 +126,17 @@ class OKXDemoTransport:
         identifier(body["clOrdId"])
         return await self._send("POST", "/api/v5/trade/cancel-order", dict(body))
 
+    async def account_read(self, kind, *, symbol=None, algo_type=None, after=None):
+        """GET-only fixed read operations; no arbitrary URL, filter or endpoint."""
+        self._require_enabled()
+        path = read_route(kind, symbol=symbol, algo_type=algo_type, after=after)
+        return await self._send("GET", path)
+
     async def _send(self, method, path, body=None, *, deadline_ms=None):
         self._require_enabled()
         # No caller-supplied URL, auth headers, redirect, proxy config or retry policy.
-        if not ((method == "GET" and path.startswith("/api/v5/trade/order?"))
+        root = path.partition("?")[0]
+        if not ((method == "GET" and (path.startswith("/api/v5/trade/order?") or root in SCHEMAS))
                 or (method == "POST" and path in {"/api/v5/trade/order", "/api/v5/trade/cancel-order"})):
             raise ValueError("Demo endpoint is not permitted")
         now = self._clock()
@@ -157,24 +166,15 @@ class OKXDemoTransport:
                         payload = bytearray()
                         async for chunk in response.aiter_bytes():
                             payload.extend(chunk)
-                            if len(payload) > MAX_RESPONSE_BYTES:
+                            if len(payload) > (MAX_READ_RESPONSE_BYTES if method == "GET" and root in SCHEMAS else MAX_RESPONSE_BYTES):
                                 raise ValueError("Response exceeds bound")
             parsed = json.loads(payload)
+            max_rows, fields = SCHEMAS[root] if method == "GET" and root in SCHEMAS else (1, ORDER_FIELDS if method == "GET" else ACK_FIELDS)
             if (not isinstance(parsed, dict) or not isinstance(parsed.get("code"), str)
                     or not re.fullmatch(r"[0-9]{1,8}", parsed["code"])
-                    or not isinstance(parsed.get("data"), list) or len(parsed["data"]) > 1):
+                    or not isinstance(parsed.get("data"), list) or len(parsed["data"]) > max_rows):
                 raise ValueError("Malformed response")
-            fields = ORDER_FIELDS if method == "GET" else ACK_FIELDS
-            rows = []
-            for row in parsed["data"]:
-                if not isinstance(row, dict):
-                    raise ValueError("Malformed response row")
-                safe = {}
-                for key in fields & row.keys():
-                    if not isinstance(row[key], str) or len(row[key]) > 128:
-                        raise ValueError("Malformed response value")
-                    safe[key] = row[key]
-                rows.append(safe)
+            rows = [safe_row(row, fields) for row in parsed["data"]]
             return {"code": parsed["code"], "data": rows}
         except Exception:
             # Do not expose httpx's request object, headers, raw body or upstream msg.

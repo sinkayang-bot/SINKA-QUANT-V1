@@ -1,6 +1,6 @@
 # OKX demo execution development — offline only
 
-The demo intent, protection, strategy bridge, executor, entry authority and transport remain
+The demo intent, protection, strategy bridge, executor, entry authority, snapshot reader and transport remain
 isolated from every deployed API, container, script, paper worker and read-only
 adapter. The new HTTP transport is default-off and has no credential discovery.
 No real credential or exchange connection was used in development. The executor
@@ -222,7 +222,8 @@ synchronization and regional endpoint compatibility still require runtime valida
 
 The client disables redirects and environment proxy configuration, sets transport
 retries to zero, bounds the entire operation to five seconds as well as HTTPX
-phase timeouts, and limits decoded responses to 64 KiB and one result row. Errors
+phase timeouts, and limits trade/individual-order responses to 64 KiB and one result row.
+The later GET inventory extension uses separate bounded read schemas (see below). Errors
 use a fixed message with suppressed request/response exception context. Returned
 fields are allowlisted; upstream messages and arbitrary response data are dropped.
 Unknown transport outcome must be reconciled rather than retried.
@@ -269,7 +270,8 @@ fields, rejects exposure/pending orders before entry, recomputes the candidate
 against the snapshot's contract metadata, loss/margin/available funds and exchange
 size caps, and invalidates cached readiness after a bad snapshot. It does not
 prove API authentication, pagination, actual leverage, exchange time or fill
-completeness: implementing the trusted reader remains outstanding.
+completeness by itself. The later two-pass snapshot reader below implements
+account/inventory acquisition; history audit is still outstanding.
 
 Daily state is persisted by Asia/Taipei calendar day: baseline equity, at most six
 **reserved entry attempts** (a conservative bound including unknown/blocked-after-
@@ -306,3 +308,64 @@ integration, then bounded protective-order repair/exit handling and packaged
 runtime acceptance. The network-backed transport is still refused by the
 rehearsal executor; no actual demo trading or new cloud deployment is authorized
 or performed by this code milestone.
+
+
+## Complete bounded account snapshot reads — HTTP intercepted acceptance
+
+`okx_demo_reads.py` defines eight fixed GET operations: account config, USDT
+balance, isolated leverage, one SWAP instrument, all positions, all pending normal
+orders, pending algos, and recent SWAP fills. `OKXDemoTransport.account_read`
+accepts operation names and bounded typed arguments rather than a URL/path or
+arbitrary filters. These reads retain fixed demo signing, redirects/proxy refusal,
+zero retries and timeout controls. Response fields and nested currency/parameter
+fields are allowlisted; read responses are at most 1 MiB, 500 positions, 100 rows
+per paginated call, one account/instrument/balance row or two leverage rows.
+Write/individual-order response bounds remain unchanged at 64 KiB / one row.
+No existing owner-facing read-only service or deployment image was modified.
+
+`DemoSnapshotReader` first verifies a configured expected account UID, net mode,
+account level 2/3 and supported API permissions before any balance/inventory read.
+UIDs remain internal to configuration validation and are absent from the result.
+A read-only key can generate diagnostic snapshots but sets
+`order_permission_verified=False`; a read+trade key can set that flag true.
+The entry authority now requires this flag explicitly in addition to its earlier
+gates. No real UID, credential or private-account fixture is stored in the repo.
+
+Then two complete passes compare normalized currency equity/available balance,
+isolated net leverage, instrument parameters, positions, normal orders, five
+supported algo types (`conditional`, `oco`, `trigger`, `move_order_stop`, `chase`)
+and recent SWAP fills. USDT amounts come only from the currency detail row:
+account-level USD equity is never treated as USDT. Available funds conservatively
+use the lesser of currency `availEq` and `availBal`. Ambiguous/missing currency,
+leverage or instrument rows and pending instrument parameter changes reject.
+
+All positions and pending normal/algo inventories are account-wide: a selected
+symbol or SWAP-only filter is NOT used to hide other pending exposure. Pagination
+requires a terminal short page, valid strictly advancing older cursors, no repeated
+identities and no more than 500 records per stream / across algo types. Six page
+requests allow exactly 500 rows plus a terminal empty page. Scan overflow,
+malformed response, duplicate/cross-type algo IDs, unsupported type or read error
+rejects the entire result. Parallel requests use TaskGroup cancellation and the
+whole scan has a five-second bound. Results use the OLDEST local receipt/start
+time, not a new timestamp assigned after slow scanning. Any inter-pass change,
+clock rollback or expiry invalidates cached success; snapshots are still not an
+atomic exchange transaction and must be revalidated before future execution.
+
+Recent fills retain contract quantity, price, signed fee/currency, optional
+reported P&L and identities; trade IDs are scoped by instrument. Repeated fills,
+nonfinite quantities/fees, unsupported fee currency and future fill times reject.
+A short API page proves only exhaustion of this recent window, **not complete
+history, net strategy P&L, funding audit or absence of unresolved local intents**.
+Returned `fill_history_complete` and `fill_audit_ready` therefore remain false.
+Even a stable fresh read+trade snapshot cannot unlock the authority by itself.
+No code silently adopts unknown orders/positions or upgrades this diagnostic
+window to an audited ledger. A durable scoped baseline/owned-fill audit is next.
+
+Acceptance: 18 new snapshot cases passed with all HTTP traffic intercepted. Tests
+cover initial UID refusal before private amounts, two-pass changes in each group,
+all algo types, cross-page/cross-instrument exposure, full terminal pages, looped
+cursors/overflow, response bounds/sanitization, permission gates and recent-fill
+incompleteness. Selected new and existing regression checks passed **149 tests
+and 164 subtests** locally. All calls were GET through MockTransport; no real
+account reads, key retrieval, order, cancel, secret/IAM change or cloud deployment
+was performed. Runtime packaging and actual account acceptance remain pending.
