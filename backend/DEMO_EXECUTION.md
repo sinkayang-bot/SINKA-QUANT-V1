@@ -1,11 +1,13 @@
 # OKX demo execution development — offline only
 
-The demo intent, protection, strategy bridge and executor modules remain isolated
-from every HTTP API, container, deployment script, paper worker and read-only
-adapter. There is no network transport, credential lookup or journal unlock.
-The new executor only coordinates an explicitly marked fake demo broker in a
-rehearsal harness. Its opt-in and gate callbacks are test controls, not trading
-authorization or proof of authenticated demo account / distributed lease state.
+The demo intent, protection, strategy bridge, executor and request transport remain
+isolated from every deployed API, container, script, paper worker and read-only
+adapter. The new HTTP transport is default-off and has no credential discovery.
+No real credential or exchange connection was used in development. The executor
+still accepts only an explicitly marked rehearsal broker: a transport backed by
+`httpx.MockTransport` can be used in tests, while its network-backed form remains
+rejected. Test opt-ins are not trading authorization, account verification or
+proof of a distributed lease. No journal unlock is supplied.
 
 Implemented:
 
@@ -138,7 +140,7 @@ Cloud Run/the VM. Backend CI pins Node 22 for the cross-language test and now al
 runs when the shared strategy engine changes.
 
 ```sh
-# From repository root, no external Python dependencies required:
+# From repository root, after installing backend requirements:
 PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_strategy_bridge.py' -v
 PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_demo_*.py' -v
 ```
@@ -149,9 +151,9 @@ PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_dem
 `okx_demo_executor.py` adds a disabled-by-default asynchronous coordinator with
 three injected fake-exchange ports: place entry, lookup entry, cancel entry.
 It accepts only a broker explicitly marked `environment=demo` and
-`rehearsal_only=True`. No HTTP/SDK broker is supplied and no deployed service
-imports it. Do not label this as OKX demo-account acceptance or enable it with a
-real broker by merely changing these attributes.
+`rehearsal_only=True`. No deployed service imports it. The separate default-off HTTP transport below
+can join it through MockTransport for intercepted tests only. Do not label this
+as OKX demo-account acceptance or bypass the rehearsal guard by changing attributes.
 
 The flow reuses strategy sizing, persistent intent/dispatch fencing, monotonic
 order observation and independent protection assessment. A transaction durably
@@ -187,9 +189,55 @@ PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_dem
 PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_strategy_bridge.py' -v
 ```
 
-Remaining before a genuine demo-account trial: a fixed demo-only authenticated
-transport, trusted complete/fresh account reader, actual lease/admission and
+Remaining before a genuine demo-account trial: trusted runtime wiring of the fixed demo-only authenticated
+transport, a complete/fresh account reader, actual lease/admission and
 daily-risk integration, fill-price risk checks, bounded protection repair and
 emergency-exit state machines, exit-fill audit/journal release, runtime packaging,
 and explicit authorization to place demo orders. The original no-exchange-trades
 instruction remains effective. Cloud resources and existing services are unchanged.
+
+
+## Default-off demo HTTP transport — intercepted acceptance only
+
+`okx_demo_transport.OKXDemoTransport` now implements the place/lookup/cancel ports
+with a fixed `https://www.okx.com` origin and unconditional simulated-trading
+header. There is no live flag, custom host or public generic request API.
+Only allowlisted isolated net-mode USDT-swap market entry with exactly one
+matching native market TP/SL bracket is supported. Unknown entry fields, mixed
+identities, header overrides, wrong modes, and invalid amounts reject before HTTP.
+Cancel is restricted to an allowlisted symbol and strategy client ID; order
+lookup encodes those validated query parameters into the signature path.
+
+Default construction permits no requests. Enabling additionally requires an
+explicit `DemoCredentials` object; the module never reads environment variables,
+Secret Manager, files or a browser. Credential representation is redacted. Tests
+use only clearly synthetic strings. Do not copy real credentials into source,
+CLI arguments, chat, fixtures or logs. Deployment secret references are unchanged.
+
+Signatures cover the exact UTC millisecond timestamp, uppercase method, encoded
+path/query and serialized JSON bytes. Request entry expiry is at most 1.5 seconds
+or the caller's earlier deadline. Expired/invalid deadlines reject before HTTP;
+this is not a substitute for signal/account/admission revalidation. Server-time
+synchronization and regional endpoint compatibility still require runtime validation.
+
+The client disables redirects and environment proxy configuration, sets transport
+retries to zero, bounds the entire operation to five seconds as well as HTTPX
+phase timeouts, and limits decoded responses to 64 KiB and one result row. Errors
+use a fixed message with suppressed request/response exception context. Returned
+fields are allowlisted; upstream messages and arbitrary response data are dropped.
+Unknown transport outcome must be reconciled rather than retried.
+
+The network-backed transport advertises `rehearsal_only=False`; the existing
+executor refuses it, even if its test enable flag is true. Only an intercepted
+MockTransport-backed instance advertises rehearsal mode for the integration
+suite. This remains a code/test milestone, not an account-level connection test
+or actual demo trade. No new cloud resource, IAM permission or secret was used.
+
+Acceptance: 15 new transport tests passed. Both exact signed POST/GET bytes and
+the executor -> transport -> intercepted entry/lookup/cancel sequence were tested,
+plus disabled/default behavior, expiry, wrong parameters, timeout/no retry,
+redirect/no forwarding, response validation/bounds, exception sanitization and
+rejection of a network-backed transport by the rehearsal executor. Across the
+selected transport/demo/bridge/read-only/risk/order/instrument regression suite,
+**111 tests plus 121 subtests passed locally**. Backend CI collects the new tests.
+Prior release b4866f72's previously pending image check also completed successfully.
