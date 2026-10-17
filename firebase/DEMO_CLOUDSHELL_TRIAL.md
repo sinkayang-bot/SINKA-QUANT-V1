@@ -46,6 +46,11 @@ python3 -m venv "$HOME/sinka-demo-venv"
 | `demo_full_snapshot_inconsistent_or_expired` | 各別讀取已通過，但完整雙次快照變動、過期或驗證未通過 |
 
 其他 `*_read_failed`／`*_inventory_invalid` 代表指定的只讀資料階段未通過。
+若策略單群組讀取失敗，會額外做逐類型的 GET 診斷，輸出例如
+`demo_pending_algos_chase_api_rejected_code_51000` 或
+`demo_pending_algos_trigger_read_failed_http_429`。這些診斷只探測第一頁以確認
+拒絕類型與錯誤碼，不提供完整庫存證明。拒絕、逾時或未知類型不會被當成空清單，
+也不會跳過原本的完整讀取要求。
 HTTP 狀態及數字 API code 可供診斷；回應原文、標頭及憑證不輸出。程式不會為了
 通過檢查而自行變更任何帳戶設定，也不會重新建立帳本或綁定。
 

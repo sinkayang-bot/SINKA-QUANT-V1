@@ -21,6 +21,7 @@ from okx_demo_trading_worker import execute
 from okx_reconcile import number
 from okx_risk import positive
 from okx_instruments import instrument_spec
+from okx_demo_reads import ALGO_TYPES
 
 PROJECT='sinka-quant'
 SECRET_NAMES=('OKX_DEMO_TRADE_API_KEY','OKX_DEMO_TRADE_API_SECRET','OKX_DEMO_TRADE_API_PASSPHRASE')
@@ -158,7 +159,20 @@ async def account_check(creds,binding=None):
         stage='demo_pending_orders_inventory_invalid'
         await reader._scan('orders')
         stage='demo_pending_algos_inventory_invalid'
-        await reader._algos()
+        try:
+            await reader._algos()
+        except Exception:
+            # Diagnose the failed group without treating any rejected type as empty.
+            # These first-page probes grant no completeness proof or trading authority.
+            for kind in ALGO_TYPES:
+                stage='demo_pending_algos_'+kind+'_read_failed'
+                response=await transport.account_read('algos',algo_type=kind)
+                code=response.get('code')
+                if code!='0':
+                    suffix=code if isinstance(code,str) and re.fullmatch(r'[0-9]{1,8}',code) else 'unknown'
+                    raise SetupBlocked('demo_pending_algos_'+kind+'_api_rejected_code_'+suffix)
+            stage='demo_pending_algos_rows_or_pagination_invalid'
+            raise ValueError()
         stage='demo_recent_fills_inventory_invalid'
         await reader._scan('fills')
         stage='demo_full_snapshot_inconsistent_or_expired'

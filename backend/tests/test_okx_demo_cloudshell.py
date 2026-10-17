@@ -167,3 +167,31 @@ def test_config_http_failure_exposes_only_status_not_headers_or_body(monkeypatch
         asyncio.run(setup.account_check(DemoCredentials('synthetic-private-key','test','test')))
     assert str(caught.value)=='demo_config_connection_failed_http_401'
     assert 'private' not in str(caught.value)
+
+
+def test_rejected_algo_type_is_identified_and_never_treated_as_empty(monkeypatch):
+    import httpx
+    fixture=Fixture(); fixture.balance['details'][0]['cashBal']='10000'
+    def override(request):
+        if request.url.path.endswith('/orders-algo-pending') and request.url.params.get('ordType')=='chase':
+            return httpx.Response(200,json={'code':'51000','msg':'private-response','data':[]})
+    fixture.response_override=override
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('synthetic-private-key','test','test')))
+    assert str(caught.value)=='demo_pending_algos_chase_api_rejected_code_51000'
+    assert 'private' not in str(caught.value)
+    assert all(request.method=='GET' for request in fixture.calls)
+
+
+def test_algo_http_failure_retains_type_and_status_only(monkeypatch):
+    import httpx
+    fixture=Fixture(); fixture.balance['details'][0]['cashBal']='10000'
+    def override(request):
+        if request.url.path.endswith('/orders-algo-pending') and request.url.params.get('ordType')=='trigger':
+            return httpx.Response(429,json={'code':'50011','msg':'private-response','data':[]})
+    fixture.response_override=override
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
+    assert str(caught.value)=='demo_pending_algos_trigger_read_failed_http_429'
