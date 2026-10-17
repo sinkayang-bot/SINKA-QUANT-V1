@@ -36,6 +36,7 @@ def receipt(response, client_id, expected_order_id=None):
 class DemoExecutionJournal(DemoIntentStore):
     def __init__(self, path):
         super().__init__(path)
+        self.entry_reservation_guard = None
         self.db.execute("CREATE TABLE IF NOT EXISTS demo_execution ("
             "id TEXT PRIMARY KEY, entry_status TEXT NOT NULL, exchange_order_id TEXT, "
             "observed_at_ms INTEGER, cancel_status TEXT NOT NULL DEFAULT 'not_requested')")
@@ -43,10 +44,16 @@ class DemoExecutionJournal(DemoIntentStore):
     def reserve_entry(self, client_id):
         self.db.execute("BEGIN IMMEDIATE")
         try:
+            authority_required = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_authority'").fetchone()
+            if authority_required and self.entry_reservation_guard is None:
+                raise ValueError("Ledger requires a bound execution authority")
             changed = self.db.execute(
                 "UPDATE demo_intent SET dispatched=1 WHERE id=? AND dispatched=0", (client_id,)).rowcount
             if changed != 1:
                 raise ValueError("Entry already reserved; reconcile without resubmitting")
+            if self.entry_reservation_guard is not None:
+                self.entry_reservation_guard(client_id)
             self.db.execute("INSERT INTO demo_execution(id,entry_status) VALUES(?,'reserved')", (client_id,))
             self.db.execute("COMMIT")
         except Exception:

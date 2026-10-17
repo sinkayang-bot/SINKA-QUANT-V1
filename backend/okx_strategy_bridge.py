@@ -116,7 +116,7 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
             instrument=instrument, side="buy" if side == 1 else "sell",
             contracts=contracts, price=anchor, stop=stop, target=target,
             equity_usdt=equity, leverage=lev, demo=True)
-        return {"plan": planned, "strategy": VERSION, "symbol": symbol,
+        return {"plan": planned, "strategy": VERSION, "symbol": symbol, "account_scope": account_scope,
                 "signal_id": signal["id"], "signal_ready_at_ms": ready,
                 "expires_at_ms": min(ready + 20000, quote_time + 15000,
                                      balance_received_at_ms + 5000, instrument_received_at_ms + 60000),

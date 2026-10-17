@@ -1,6 +1,6 @@
 # OKX demo execution development — offline only
 
-The demo intent, protection, strategy bridge, executor and request transport remain
+The demo intent, protection, strategy bridge, executor, entry authority and transport remain
 isolated from every deployed API, container, script, paper worker and read-only
 adapter. The new HTTP transport is default-off and has no credential discovery.
 No real credential or exchange connection was used in development. The executor
@@ -190,8 +190,8 @@ PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_str
 ```
 
 Remaining before a genuine demo-account trial: trusted runtime wiring of the fixed demo-only authenticated
-transport, a complete/fresh account reader, actual lease/admission and
-daily-risk integration, fill-price risk checks, bounded protection repair and
+transport, a complete/fresh account reader, verified audit inputs and deployment
+of the local authority/daily-risk integration, fill-price risk checks, bounded protection repair and
 emergency-exit state machines, exit-fill audit/journal release, runtime packaging,
 and explicit authorization to place demo orders. The original no-exchange-trades
 instruction remains effective. Cloud resources and existing services are unchanged.
@@ -241,3 +241,68 @@ rejection of a network-backed transport by the rehearsal executor. Across the
 selected transport/demo/bridge/read-only/risk/order/instrument regression suite,
 **111 tests plus 121 subtests passed locally**. Backend CI collects the new tests.
 Prior release b4866f72's previously pending image check also completed successfully.
+
+
+## Persistent local account authority — synthetic integration
+
+`okx_demo_authority.DemoEntryAuthority` adds a separate execution-authority ledger
+on the exact SQLite connection used by `DemoExecutionJournal`. The existing
+Firestore **read-only** sync lease remains unchanged and cannot grant submission
+rights. No real runtime or private-account reader is wired to this authority.
+
+The lease has an account scope, unique process session, owner, monotonically
+increasing fencing epoch, 30-second expiry and clock-rollback rejection. Workers
+sharing the same file contend transactionally; same worker names with different
+sessions cannot share a current lease. New ownership/expiry reacquisition forces
+the kill switch on and clears in-memory snapshot/candidate readiness. A new
+session must accept a snapshot received after acquisition; persisted success
+cannot be reused. Renewing an unexpired lease retains its epoch. Session IDs must
+be new per process; the optional explicit session value exists for test fixtures.
+This is a **local shared-file lease**, not distributed coordination across VM
+copies/disks. It cannot revoke an exchange request already in flight.
+
+Snapshot input is an attestation from a future trusted reader. It must bind the
+account scope, symbol, verified demo/net mode, isolated leverage, USDT equity and
+available funds, complete positions/normal-order/algo inventories, monitor health
+and fill-audit readiness, received within five seconds. The gate validates these
+fields, rejects exposure/pending orders before entry, recomputes the candidate
+against the snapshot's contract metadata, loss/margin/available funds and exchange
+size caps, and invalidates cached readiness after a bad snapshot. It does not
+prove API authentication, pagination, actual leverage, exchange time or fill
+completeness: implementing the trusted reader remains outstanding.
+
+Daily state is persisted by Asia/Taipei calendar day: baseline equity, at most six
+**reserved entry attempts** (a conservative bound including unknown/blocked-after-
+reservation attempts), three consecutive audited net losses, sticky 2% equity-
+drawdown halt, and 15-minute post-close cooldown. Restart preserves the original
+day baseline and counters. A rebound/kill toggle cannot clear a daily halt; the
+next calendar day resets day counters/baseline while carrying remaining cooldown
+and close chronology. Net-close events require explicit audit attestation and
+stable IDs, reject changed replays, and are idempotent; the event producer/fill
+math is not implemented here. The authority does not release old order intents.
+
+Entry dispatch reservation, authority/fence/freshness validation, daily-attempt
+increment and execution record commit are one `BEGIN IMMEDIATE` transaction.
+Failure rolls them all back. If the ledger contains authority state, reopening it
+without a bound authority cannot bypass checks. The sixth reservation remains
+valid for its second pre-send check but a seventh candidate is denied. Post-
+reservation expiry, disabled/kill state or lost authority still prevents the fake
+exchange call; its consumed attempt is retained conservatively. Recovery checks
+require current owner and a healthy fresh verified snapshot, but ignore entry
+kill/daily-loss limits so those entry limits do not themselves block reducing
+existing exposure. Real cancel/repair/exit integration remains default-off.
+
+Added local acceptance: 20 authority tests passed, including same-ledger contention,
+expired-owner takeover, missing/new-session snapshots, stale and malformed data,
+changed balances/specifications, persistent counters/baseline/halts, idempotent
+close audit, midnight cooldown, transaction rollback and lease-loss race. An
+end-to-end test now runs strategy sizing -> real authority gate -> atomic reserve
+-> signed HTTP transport -> MockTransport acknowledgement with exactly one risk
+reservation. No account or exchange was contacted. The selected existing plus
+new regression suite passed **131 tests and 135 subtests** locally.
+
+Next required work is a complete trusted demo-account snapshot reader and audit
+integration, then bounded protective-order repair/exit handling and packaged
+runtime acceptance. The network-backed transport is still refused by the
+rehearsal executor; no actual demo trading or new cloud deployment is authorized
+or performed by this code milestone.
