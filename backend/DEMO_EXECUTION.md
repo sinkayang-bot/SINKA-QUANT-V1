@@ -369,3 +369,49 @@ incompleteness. Selected new and existing regression checks passed **149 tests
 and 164 subtests** locally. All calls were GET through MockTransport; no real
 account reads, key retrieval, order, cancel, secret/IAM change or cloud deployment
 was performed. Runtime packaging and actual account acceptance remain pending.
+
+## Durable owned-entry fill audit (offline component)
+
+`okx_demo_fill_audit.py` persists an explicit **flat baseline** and scoped entry
+fill ledger in the same SQLite database as the execution journal and lease.
+Bootstrap requires `baseline_authorized=True`, no existing audit or intent,
+zero account exposure and no pending normal/algo orders. Existing state cannot
+be reset or re-baselined by this component. Baseline recent history is retained
+as history only; it does not become strategy P&L. This flag is a local caller
+assertion, not a user authorization UI or permission to trade.
+
+Subsequent audits require a fresh unaudited reader snapshot, a current owner,
+a continuity gap of at most 60 seconds and retention of the previous fill anchor
+in the bounded recent window. Every dispatched owned entry must have a fresh
+individual order lookup at or after the inventory scan started. Ambiguous
+submission outcomes and incomplete pending-order inventories block certification.
+New fills must match owned entry order IDs, instrument, direction and baseline
+time, and report zero closing P&L. Exact decimal quantities must sum to each
+order's cumulative filled size and to the account's signed isolated net positions.
+Fee and price data are retained immutably, but fee totals are not yet reconciled
+against exchange order summaries or account bills.
+
+A failed attempt invalidates the previous receipt and local cached snapshot.
+Fill inserts, anchor and revision changes commit atomically; failure preserves
+the prior ledger. A successful audit commits a receipt bound to the snapshot
+hash, account scope, lease epoch and session. Once the audit receipt table exists,
+entry authority checks this proof on snapshot acceptance and immediately before
+entry reservation; merely changing `fill_audit_ready` cannot unlock entry.
+Takeover requires a fresh audit and keeps the kill switch enabled. An old owner
+cannot invalidate the current owner's receipt. This remains a shared-file local
+lease, not distributed cloud coordination.
+
+The certified scope is `owned_entries_since_flat_baseline`;
+`fill_history_complete` remains false. Unknown/manual fills, native protective
+exit-child fills, missed anchors and gaps over 60 seconds halt this component.
+It currently provides no archive catch-up/reset path, native-exit adoption,
+closed-trade net P&L, funding reconciliation or audited daily-close producer.
+Those remain necessary before a complete automatic demo trading lifecycle.
+The audit is not wired into a deployed worker or a network-enabled executor.
+
+Acceptance: 15 new synthetic tests, including intercepted GET reader → audit →
+authority integration, partial and terminal fills, duplicate prevention, immutable
+fees, rollback, missing/excess fills, historical baseline separation, receipt
+binding and restart with retained fills. Selected regression passed **164 tests
+and 185 subtests** locally. No actual OKX account read or order/cancel request,
+credential retrieval, cloud deployment or billing change was performed.

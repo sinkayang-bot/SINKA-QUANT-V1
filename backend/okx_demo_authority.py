@@ -6,6 +6,7 @@ Snapshots are supplied by a trusted-reader port, not authenticated here.
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, localcontext
+import hashlib
 import json
 import re
 import uuid
@@ -19,6 +20,10 @@ from okx_strategy_bridge import timestamp
 
 def day_key(now):
     return datetime.fromtimestamp(now / 1000, timezone.utc).astimezone(timezone(timedelta(hours=8))).date().isoformat()
+
+
+def snapshot_digest(snapshot):
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
 class DemoEntryAuthority:
@@ -131,6 +136,19 @@ class DemoEntryAuthority:
             raise ValueError("Instrument snapshot mismatch")
         return spec
 
+    def invalidate_snapshot(self):
+        self.snapshot = None
+        self.approved = None
+
+    def _verify_audit_receipt(self, snapshot, now):
+        required = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_audit_receipt'").fetchone()
+        if not required:
+            return  # Compatibility for isolated legacy rehearsal fixtures only.
+        row = self.db.execute("SELECT scope,epoch,session,checked_at,snapshot_hash,valid FROM demo_audit_receipt WHERE singleton=1").fetchone()
+        if (not row or row[0] != self.scope or row[1] != self.epoch or row[2] != self.session or row[5] != 1
+                or not 0 <= now - row[3] <= 5000 or row[4] != snapshot_digest(snapshot)):
+            raise ValueError("Current committed fill audit receipt required")
+
     def accept_snapshot(self, snapshot):
         self.snapshot = None
         self.approved = None
@@ -139,6 +157,7 @@ class DemoEntryAuthority:
         self.db.execute("BEGIN IMMEDIATE")
         try:
             self._owner(now)
+            self._verify_audit_receipt(snapshot, now)
             day = day_key(now)
             equity = positive(snapshot["equity_usdt"], "equity")
             previous = self.db.execute("SELECT cooldown,last_close FROM demo_daily ORDER BY day DESC LIMIT 1").fetchone()
@@ -160,6 +179,7 @@ class DemoEntryAuthority:
         if owner[5]:
             raise ValueError("Kill switch active")
         spec = self._validate_snapshot(self.snapshot, now)
+        self._verify_audit_receipt(self.snapshot, now)
         snapshot = self.snapshot
         if snapshot["pending_orders"] or snapshot["pending_algos"]:
             raise ValueError("Unresolved orders or protection")
