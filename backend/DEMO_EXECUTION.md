@@ -635,3 +635,70 @@ Selected regression passed **229 tests and 296 subtests** locally. No real
 account reads, credential access, order/cancel request, GCP resource or billing
 change was performed. Actual account compatibility, multi-intent archival and
 release, cross-day settlement and deployed runtime integration remain pending.
+
+## Explicit cycle archival, idle bill proof and next-signal eligibility
+
+`okx_demo_cycles.py` adds `DemoCycleLifecycle`, with cycle transitions disabled
+unless the caller explicitly sets `enable_cycle_transition=True`. It sends no
+exchange request and is not wired to a deployed worker or network executor.
+`advance_cycle(snapshot, bills)` revalidates the current full bill/cash settlement
+INSIDE the same SQLite transaction used for archival. Daily-risk publication,
+complete archival of the current active ledgers and creation of the next flat
+baseline therefore commit together. An injected failure after the archive insert
+and active-ledger clearing rolls the whole transaction back, including a new risk
+publication. The original active intent/fills remain available for recovery.
+
+Archives retain the intent/plan and observation, execution record, fill metadata,
+all fills and fees, original contract/cash context, account bills, close,
+settlement and readiness receipt, with the matching persistent risk-close record.
+Verification metadata binds the current account snapshot and bill evidence by
+hash. Archives form an ordered SHA-256 chain and retain every used client ID.
+This detects accidental corruption; it does not protect against an administrator
+who can deliberately rewrite the entire database and chain. Current sequence,
+latest hash and cycle boundary must match before another transition/idle audit.
+An archived strategy client ID cannot be registered or dispatched again.
+
+Only after its archive has been inserted in the transaction are the old active
+cycle tables cleared. Lease/session, all archives, daily baselines, entry counts,
+loss streak, halt, cooldown and risk-close history are NEVER cleared. Current
+recent fills become historical baseline rows for the new cycle, using the
+verified current flat currency cash and instrument metadata. This is a named,
+validated cycle transition, not a fallback reset after a failed reconciliation.
+Generic bootstrap still refuses to reset an existing audit.
+
+Transition returns a fresh snapshot proof, but `new_entry_allowed` and
+`submission_enabled` remain false. The caller must accept that proof and apply
+the existing authority checks. A subsequent signal must be newer than the cycle
+boundary. The 15-minute cooldown, third-loss halt, six-entry daily cap, kill
+switch, fresh balance/instrument checks and atomic dispatch reservation still
+apply. Takeover restores the kill switch and requires current-session proof;
+archival cannot revive an old worker or grant a duplicate dispatch.
+
+While waiting for a new signal, `audit_idle(snapshot, bills)` renews entry
+readiness only with an account-wide two-pass EMPTY bill interval from the current
+cycle boundary, unchanged original cash, no unknown/changed fills, a flat account
+and no normal/protective orders. It retains the 60-second audit continuity bound
+and seven-day recent-bill endpoint bound. Funding/transfer/adjustment activity
+while idle fails closed and requires separate reconciliation. Each accepted
+entry proof is bound to cycle sequence, lease epoch, session and exact snapshot
+hash in addition to the existing fill-audit receipt. A generic fill audit alone
+cannot refresh entry eligibility after a cycle transition. These are observations
+as of their cutoffs, not a guarantee against later exchange postings.
+
+The settlement implementation now exposes an internal transaction-sharing
+primitive; its existing public wrapper preserves the earlier behavior. No
+exchange POST operation, API key read, cloud change or billing change is added.
+Actual demo-account response acceptance, runtime orchestration, distributed
+coordination, cross-day delayed settlement and longer offline catch-up remain
+outstanding. Unsupported cases preserve state and block entry.
+
+Acceptance: 18 new synthetic tests cover rollback, archival integrity, replay
+prevention, idle cash/bill/fill changes, cooldown, daily cap, kill switch, third
+loss, current-session receipt requirements and failed generic-audit bypass.
+An intercepted bill reader feeds idle proof renewal. A complete two-cycle
+rehearsal includes first close/settlement/archive, process/lease restart,
+continuous idle monitoring through cooldown, a newer second signal, its full
+entry/close/settlement and a second archive. Both histories and two daily risk
+entries/closes remain intact. Selected regression passed **247 tests and 301
+subtests** locally. Every order in that rehearsal is an in-memory FakeExchange
+operation; no actual OKX demo or live order/cancel/account request was made.

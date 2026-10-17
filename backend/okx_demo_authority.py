@@ -143,11 +143,24 @@ class DemoEntryAuthority:
     def _verify_audit_receipt(self, snapshot, now):
         required = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_audit_receipt'").fetchone()
         if not required:
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_cycle_state'").fetchone():
+                raise ValueError("Cycle audit receipt table missing")
             return  # Compatibility for isolated legacy rehearsal fixtures only.
         row = self.db.execute("SELECT scope,epoch,session,checked_at,snapshot_hash,valid FROM demo_audit_receipt WHERE singleton=1").fetchone()
         if (not row or row[0] != self.scope or row[1] != self.epoch or row[2] != self.session or row[5] != 1
                 or not 0 <= now - row[3] <= 5000 or row[4] != snapshot_digest(snapshot)):
             raise ValueError("Current committed fill audit receipt required")
+        cycles=self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_cycle_state'").fetchone()
+        if cycles:
+            state=self.db.execute("SELECT sequence,started_at,previous_hash FROM demo_cycle_state WHERE singleton=1").fetchone()
+            tail=self.db.execute("SELECT sequence,hash FROM demo_cycle_archive ORDER BY sequence DESC LIMIT 1").fetchone()
+            if state is None or (state[0]==0 and tail is not None) or (state[0]>0 and tail!=(state[0],state[2])):
+                raise ValueError("Cycle checkpoint does not match archive")
+            if state[0]>0:
+                proof=self.db.execute("SELECT sequence,epoch,session,snapshot_hash FROM demo_cycle_entry_receipt WHERE singleton=1").fetchone()
+                if (not proof or proof[:3]!=(state[0],self.epoch,self.session) or proof[3]!=snapshot_digest(snapshot)):
+                    raise ValueError("Current cycle cash/bill receipt required")
+
 
     def accept_snapshot(self, snapshot):
         self.snapshot = None
@@ -180,6 +193,12 @@ class DemoEntryAuthority:
             raise ValueError("Kill switch active")
         spec = self._validate_snapshot(self.snapshot, now)
         self._verify_audit_receipt(self.snapshot, now)
+        cycles=self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_cycle_state'").fetchone()
+        if cycles:
+            state=self.db.execute("SELECT sequence,started_at,previous_hash FROM demo_cycle_state WHERE singleton=1").fetchone()
+            if state and state[0]>0 and candidate.get("signal_ready_at_ms",0)<=state[1]:
+                raise ValueError("Signal predates current cycle boundary")
+
         snapshot = self.snapshot
         if snapshot["pending_orders"] or snapshot["pending_algos"]:
             raise ValueError("Unresolved orders or protection")
