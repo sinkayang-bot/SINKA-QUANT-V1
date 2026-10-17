@@ -1,0 +1,46 @@
+name: Demo reconciliation image
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/reconciliation-image.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/reconciliation-image.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  get-only-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated reconciliation worker
+        run: docker build -f backend/Dockerfile.okx-reconciliation -t sinka-demo-reconciliation:ci backend
+      - name: Verify disabled startup without network or writable root
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp sinka-demo-reconciliation:ci > "$RUNNER_TEMP/reconciliation-disabled.json"
+          python - "$RUNNER_TEMP/reconciliation-disabled.json" <<'PY'
+          import json,sys
+          value=json.load(open(sys.argv[1]))
+          assert value['phase']=='disabled'
+          assert value['orders_sent']==0
+          assert value['exchange_submission_enabled'] is False
+          assert value['new_entry_allowed'] is False
+          PY
+      - name: Require server configuration before any enabled read
+        run: |
+          if docker run --rm --network none --read-only --tmpfs /tmp -e RUN_DEMO_RECONCILIATION=1 sinka-demo-reconciliation:ci > "$RUNNER_TEMP/reconciliation-config.json"; then
+            echo "Expected missing server configuration to stop the worker"
+            exit 1
+          else
+            result=$?
+            test "$result" -eq 2
+          fi
+          python - "$RUNNER_TEMP/reconciliation-config.json" <<'PY'
+          import json,sys
+          value=json.load(open(sys.argv[1]))
+          assert value['phase']=='configuration_missing'
+          assert value['orders_sent']==0
+          PY

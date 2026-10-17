@@ -702,3 +702,76 @@ entry/close/settlement and a second archive. Both histories and two daily risk
 entries/closes remain intact. Selected regression passed **247 tests and 301
 subtests** locally. Every order in that rehearsal is an in-memory FakeExchange
 operation; no actual OKX demo or live order/cancel/account request was made.
+
+## One-shot read reconciliation runner and isolated runtime package
+
+`okx_demo_reconciliation.py` integrates verified reads, entry observation,
+closed-trade audit, bill/funding settlement and cycle archival. It is disabled
+by default. Enabled runs acquire/renew the shared-file lease and invalidate old
+entry readiness BEFORE network reads. Runners sharing one authority also share
+an async lock. An occupied lease or unsubmitted intent causes no private read
+and no implicit dispatch. A missing baseline returns `baseline_required`;
+`initialize_baseline=True` is an explicit first-bootstrap assertion, never a
+reset of existing intents or history. Initialization preserves the kill switch.
+
+For a dispatched entry, a composite five-second read brackets two detail passes
+and two complete bill passes with two complete verified account snapshots.
+Every group uses the SAME initial account cutoff, avoiding the previous need
+to manually refresh an entry between independent close and bill bundles. The
+account, detail rows and normalized bill sets must remain stable. Active,
+ambiguous, unprotected or unsupported exits block and retain the original intent.
+The runner currently reconciles supported CLOSED cycles and clean idle accounts;
+it does not monitor/repair open protection or execute a strategy entry.
+
+The runner starts ONE current-owner SQLite transaction after the reads. Entry
+observation and fill ingestion, immutable close, bill settlement, daily risk and
+archive/baseline rotation are committed together using shared internal audit
+primitives. A late failure rolls all of them back. Restart re-queries the same
+client ID; there is no submission/resubmission path. A crash after commit but
+before snapshot acceptance recovers into the new idle cycle without another
+archive or risk-close publication. Idle cycles, including an initialized first
+cycle, use full empty bill/cash validation. No runner status grants entry:
+`new_entry_allowed` and `exchange_submission_enabled` remain false, with
+`orders_sent=0`. Errors are fixed sanitized statuses and cancellation propagates
+while invalidating old readiness. A stale owner cannot invalidate a new owner's
+proof or commit scan results after takeover.
+
+`okx_demo_reconciliation_worker.py` is the bounded one-shot server entrypoint.
+`RUN_DEMO_RECONCILIATION=1` is required before even resolving server credentials.
+It uses the existing server environment names `OKX_API_KEY`, `OKX_API_SECRET`,
+`OKX_API_PASSPHRASE`; values must remain server-side and are never printed. It
+also requires configured `OKX_EXPECTED_UID`, `DEMO_ACCOUNT_SCOPE` and an absolute
+`DEMO_LEDGER_PATH` whose parent exists on a persistent mounted local filesystem.
+Optional `DEMO_SYMBOL` defaults to BTC-USDT-SWAP; `DEMO_WORKER_ID` defaults to
+read-reconciliation. `DEMO_CYCLE_TRANSITIONS=1` enables LOCAL archival only;
+`DEMO_INITIALIZE_BASELINE=1` asserts first bootstrap only. There is no flag to
+clear the kill switch, place/cancel an order or schedule another execution.
+Each process uses a new lease session; later one-shot runs must respect its
+30-second lease and 60-second continuity bound. No scheduler is installed.
+
+The entrypoint uses `OKXDemoReadTransport`, which structurally rejects entry,
+cancel and every non-GET/internal request with a body. It cannot submit even
+when the configured key has trade permission. It makes no credential discovery
+call. Status output contains no key, UID, raw provider error or private amounts.
+Disabled exits with code 0; missing/inconsistent configuration or blocked reads
+exit 2; occupied lease/busy exits 3. Supported initialization/idle/archive exits 0.
+
+`Dockerfile.okx-reconciliation` packages only the Python read/audit dependency
+set, runs as UID 10001 and provides `/data` for a separately mounted retained
+ledger. It is not deployed by this change. The added GitHub image workflow builds
+it and verifies disabled and missing-configuration startup with network disabled
+and a read-only root. No Artifact Registry push, GCP job/service mutation,
+secret binding or billing change is included. Actual account response/storage
+acceptance, strategy/open-position runtime integration, cross-day recovery and
+longer offline catch-up remain outstanding. SQLite on an ephemeral task disk is
+not an acceptable substitute for persistent storage.
+
+Acceptance: 17 new runner tests plus 6 read-transport/runtime tests cover the
+full intercepted GET-to-archive transaction, initial setup, idle continuation,
+missing bills, failed archive rollback, crash after commit, restart, competing
+workers, cancellation, stale-owner fencing and structural write refusal.
+Selected regression passed **270 tests and 301 subtests** locally. Local disabled
+entrypoint returned `phase=disabled`, zero orders and both entry/submission flags
+false. Image validation is performed by CI because local Docker is unavailable.
+All account requests in tests are intercepted; no actual OKX read, order/cancel,
+credential retrieval or cloud deployment was performed.

@@ -1,0 +1,213 @@
+"""Complete intercepted GET runner, atomic failure and restart recovery."""
+import asyncio
+from copy import deepcopy
+from decimal import Decimal
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+import httpx
+import test_okx_demo_settlement as fixtures
+from test_okx_demo_close_reader import CloseFixture
+from okx_demo_reconciliation import DemoReconciliationRunner
+from okx_demo_cycles import DemoCycleLifecycle
+from okx_demo_executor import DemoExecutionJournal
+from okx_demo_authority import DemoEntryAuthority
+
+
+class RunnerFixture(CloseFixture):
+    def __init__(self):
+        super().__init__(); self.bills=[]; self.bill_calls=0; self.bill_mutate=None
+        self.balance['details'][0]['cashBal']='10000'
+
+    def override(self,request):
+        if request.url.path!='/api/v5/account/bills': return super().override(request)
+        self.bill_calls+=1
+        if self.bill_mutate: self.bill_mutate(self)
+        q=dict(request.url.params)
+        if set(q)-{'ccy','begin','end','limit','after'} or q['ccy']!='USDT':
+            raise AssertionError('Unfiltered account-wide USDT bills required')
+        rows=[r for r in self.bills if int(q['begin'])<=int(r['ts'])<=int(q['end'])]
+        if 'after' in q: rows=[r for r in rows if int(r['billId'])<int(q['after'])]
+        return httpx.Response(200,json=dict(code='0',data=deepcopy(rows[:100]),msg='private'))
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        t=fixtures.SettlementTests('test_zero_funding_requires_complete_scans_and_cash_check')
+        t.auditor_class=DemoCycleLifecycle; t.setUp(); self.addCleanup(t.doCleanups); self.t=t
+        raw,close,broker,engine=t.trade()
+        self.key=broker.body['clOrdId']; self.original_plan=deepcopy(t.candidate['plan'])
+        self.f=RunnerFixture(); f=self.f
+        f.plan=deepcopy(self.original_plan); f.entry=deepcopy(broker.row)
+        f.algo=deepcopy(close['algo']['rows'][0]); f.child=deepcopy(close['child']['rows'][0]); f.fills=deepcopy(raw['recent_fills'])
+        net=sum((Decimal(row['fillPnl'])+Decimal(row['fee']) for row in f.fills),Decimal(0))-1
+        for row in f.fills:
+            f.bills.append(dict(billId=row['billId'],ts=row['fillTime'],type='2',subType='1' if row['side']=='buy' else '2',
+                ordId=row['ordId'],tradeId=row['tradeId'],instId=row['instId'],instType='SWAP',ccy='USDT',
+                pnl=row['fillPnl'],fee=row['fee'],sz=row['fillSz'],px=row['fillPx'],balChg=str(Decimal(row['fillPnl'])+Decimal(row['fee']))))
+        f.bills.append(dict(billId='103',ts=str(t.now),type='8',subType='173',ordId='',tradeId='',instId='BTC-USDT-SWAP',
+            instType='SWAP',ccy='USDT',pnl='-1',fee='0',balChg='-1',sz=broker.body['sz'],px='101'))
+        f.bills.sort(key=lambda b:int(b['billId']),reverse=True)
+        t.now+=6000; f.now=t.now
+        f.balance['details'][0]['cashBal']=str(Decimal('10000')+net)
+        t.journal.db.execute('UPDATE demo_intent SET snapshot=NULL')
+        t.journal.db.execute('UPDATE demo_execution SET observed_at_ms=NULL')
+        t.audit.enabled=True
+        self.runner=DemoReconciliationRunner(t.audit,f.reader(),enabled=True)
+
+    def run_once(self,**kwargs): return asyncio.run(self.runner.run_once(**kwargs))
+
+    def test_single_run_reads_closes_settles_archives_and_next_run_is_idle(self):
+        result=self.run_once()
+        self.assertEqual(result['phase'],'cycle_archived')
+        self.assertEqual(result['sequence'],1)
+        self.assertFalse(result['new_entry_allowed']); self.assertEqual(result['orders_sent'],0)
+        db=self.t.journal.db
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+        self.assertIsNone(db.execute('SELECT 1 FROM demo_intent').fetchone())
+        self.assertEqual(self.run_once()['phase'],'idle_verified')
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+        self.assertNotIn('private',json.dumps(result)); self.assertNotIn('123456',json.dumps(result))
+
+    def test_disabled_runner_and_disabled_transition_never_reach_http(self):
+        self.runner.enabled=False
+        self.assertEqual(self.run_once()['phase'],'disabled'); self.assertEqual(self.f.calls,[])
+        self.runner.enabled=True; self.t.audit.enabled=False
+        self.assertEqual(self.run_once()['phase'],'cycle_transition_disabled'); self.assertEqual(self.f.calls,[])
+
+    def test_unsubmitted_intent_preserved_without_request_or_resubmit(self):
+        self.t.journal.db.execute('UPDATE demo_intent SET dispatched=0')
+        self.assertEqual(self.run_once()['phase'],'unsubmitted_intent_preserved')
+        self.assertEqual(self.f.calls,[])
+        self.assertEqual(self.t.journal.db.execute('SELECT dispatched FROM demo_intent').fetchone()[0],0)
+
+    def test_wrong_uid_changes_no_order_or_fill_ledger(self):
+        self.f.config['uid']='999'
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertIsNone(self.t.journal.db.execute('SELECT snapshot FROM demo_intent').fetchone()[0])
+        self.assertTrue(all(r.url.path.endswith('/config') for r in self.f.calls))
+
+    def test_active_or_ambiguous_native_exit_preserves_intent(self):
+        self.f.algo.update(state='live',ordIdList=[])
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_intent').fetchone()[0],1)
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+
+    def test_data_change_between_passes_rejects_composite_bundle(self):
+        self.f.bill_mutate=lambda f:f.balance['details'][0].update(cashBal='10000')
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_audit_fills').fetchone())
+
+    def test_archive_failure_rolls_back_ingested_observation_close_fills_and_risk(self):
+        with patch.object(self.t.audit,'_advance_cycle_in_transaction',side_effect=ValueError('private-failure')):
+            result=self.run_once()
+        self.assertEqual(result['phase'],'blocked'); self.assertNotIn('private-failure',json.dumps(result))
+        db=self.t.journal.db
+        self.assertIsNone(db.execute('SELECT snapshot FROM demo_intent').fetchone()[0])
+        self.assertIsNone(db.execute('SELECT observed_at_ms FROM demo_execution').fetchone()[0])
+        for table in ('demo_audit_fills','demo_closed_trade','demo_risk_close','demo_cycle_archive'):
+            self.assertIsNone(db.execute('SELECT 1 FROM '+table).fetchone())
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_missing_bill_rolls_back_close_ingestion_and_can_resume(self):
+        missing=self.f.bills.pop(1)
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_closed_trade').fetchone())
+        self.f.bills.append(missing); self.f.bills.sort(key=lambda b:int(b['billId']),reverse=True)
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+
+    def test_crash_after_commit_before_acceptance_recovers_from_archive_without_duplication(self):
+        with patch.object(self.t.authority,'accept_snapshot',side_effect=RuntimeError('simulated handoff crash')):
+            self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+        self.assertEqual(self.run_once()['phase'],'idle_verified')
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+
+    def test_restart_after_failed_read_resolves_original_id_without_resubmission(self):
+        self.f.child['algoId']='999'; self.assertEqual(self.run_once()['phase'],'blocked')
+        self.f.child['algoId']='444'; self.t.now+=30001; self.f.now=self.t.now
+        journal=self.t.open_journal(); owner=self.t.owner(journal,'second')
+        lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
+        runner=DemoReconciliationRunner(lifecycle,self.f.reader(),enabled=True)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'cycle_archived')
+        self.assertEqual(journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertEqual(journal.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_competing_owner_cannot_start_private_reads(self):
+        journal=self.t.open_journal(); owner=self.t.owner(journal,'second')
+        lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
+        runner=DemoReconciliationRunner(lifecycle,self.f.reader(),enabled=True)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'lease_unavailable')
+        self.assertEqual(self.f.calls,[])
+
+    def test_concurrent_runs_share_authority_lock_and_do_not_duplicate_work(self):
+        async def exercise():
+            started=asyncio.Event(); release=asyncio.Event()
+            original=self.runner._closed_bundle
+            async def stalled(*args):
+                started.set(); await release.wait(); return await original(*args)
+            other=DemoReconciliationRunner(self.t.audit,self.f.reader(),enabled=True)
+            with patch.object(self.runner,'_closed_bundle',side_effect=stalled):
+                first=asyncio.create_task(self.runner.run_once()); await started.wait()
+                self.assertEqual((await other.run_once())['phase'],'busy')
+                release.set(); self.assertEqual((await first)['phase'],'cycle_archived')
+        asyncio.run(exercise())
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+
+    def test_external_cancellation_preserves_intent_and_clears_old_readiness(self):
+        async def exercise():
+            started=asyncio.Event()
+            async def stalled(*a): started.set(); await asyncio.Future()
+            with patch.object(self.runner,'_closed_bundle',side_effect=stalled):
+                task=asyncio.create_task(self.runner.run_once()); await started.wait(); task.cancel()
+                with self.assertRaises(asyncio.CancelledError): await task
+        asyncio.run(exercise())
+        self.assertEqual(self.runner.last_result['phase'],'cancelled')
+        self.assertIsNone(self.t.authority.snapshot)
+        self.assertEqual(self.t.journal.db.execute('SELECT valid FROM demo_audit_receipt').fetchone()[0],0)
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_intent').fetchone()[0],1)
+
+    def test_fencing_during_network_scan_cannot_commit_or_invalidate_new_owner(self):
+        takeover=[]
+        def change_owner(f):
+            if takeover: return
+            self.t.now+=30001; f.now=self.t.now
+            owner=self.t.owner(self.t.open_journal(),'second'); owner.acquire(); takeover.append(owner)
+        self.f.bill_mutate=change_owner
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.assertEqual(self.t.journal.db.execute('SELECT session FROM demo_authority').fetchone()[0],'second')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+
+    def test_scope_mismatch_rejected_at_constructor(self):
+        other=self.f.reader(account_scope='other')
+        with self.assertRaises(ValueError): DemoReconciliationRunner(self.t.audit,other)
+
+
+class InitializationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.f=RunnerFixture()
+        self.journal=DemoExecutionJournal(Path(self.temp.name)/'ledger.sqlite'); self.addCleanup(self.journal.close)
+        self.owner=DemoEntryAuthority(self.journal,account_scope='synthetic-v1',worker_id='worker',clock=lambda:self.f.now)
+        self.lifecycle=DemoCycleLifecycle(self.owner,enable_cycle_transition=True)
+        self.runner=DemoReconciliationRunner(self.lifecycle,self.f.reader(),enabled=True)
+
+    def test_first_baseline_requires_explicit_flag_and_starts_killed(self):
+        self.assertEqual(asyncio.run(self.runner.run_once())['phase'],'baseline_required')
+        self.assertEqual(self.f.calls,[])
+        self.assertEqual(asyncio.run(self.runner.run_once(initialize_baseline=True))['phase'],'baseline_initialized')
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertEqual(asyncio.run(self.runner.run_once())['phase'],'idle_verified')
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_initialization_never_resets_existing_unsubmitted_intent(self):
+        self.journal.register(self.f.plan)
+        self.assertEqual(asyncio.run(self.runner.run_once(initialize_baseline=True))['phase'],'blocked')
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_fill_audit_meta').fetchone())
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_intent').fetchone()[0],1)

@@ -197,3 +197,17 @@ class OKXDemoTransport:
         except Exception:
             # Do not expose httpx's request object, headers, raw body or upstream msg.
             raise DemoTransportError("Demo request failed; reconcile before any retry") from None
+
+
+class OKXDemoReadTransport(OKXDemoTransport):
+    """Structural GET-only transport for reconciliation runtimes."""
+    async def _send(self,method,path,body=None,*,deadline_ms=None):
+        if method!='GET' or body is not None or deadline_ms is not None:
+            raise DemoTransportError('Reconciliation transport permits GET only')
+        return await super()._send(method,path)
+
+    async def place_entry(self,*args,**kwargs):
+        raise DemoTransportError('Reconciliation transport cannot place orders')
+
+    async def cancel_entry(self,*args,**kwargs):
+        raise DemoTransportError('Reconciliation transport cannot cancel orders')
