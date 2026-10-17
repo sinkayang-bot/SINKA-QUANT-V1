@@ -32,7 +32,8 @@ Not implemented or enabled:
 
 - No exchange writes, actual demo order, live protective-order collection/repair,
   cancellation of an unfilled remainder, emergency reduce-only exit, automatic
-  journal release, strategy-to-contract sizing bridge or continuous demo runner.
+  journal release, live strategy bridge or continuous demo runner. An offline sizing bridge now
+  exists, as described below.
 - This journal is not a distributed account lock or a substitute for existing
   lease-fenced admission/synchronization checks. Plans are local research data;
   a future executor must independently revalidate the whole plan, fresh signal,
@@ -94,3 +95,48 @@ with parameterized subtests for stale/malformed data, incorrect protection,
 partial/canceled fills, long/short sides, unexpected exposure, triggered algos,
 orphan cleanup, and persistent identity binding. Existing CI also collects these
 via pytest. No OKX request was made during these tests.
+
+
+## Offline strategy-to-contract bridge
+
+`okx_strategy_bridge.plan_strategy_signal` consumes the existing JavaScript
+SNR-5M-1 engine output directly. It does not duplicate the EMA/range/ATR rules or
+reuse the research account's base-coin quantity as the number of contracts.
+
+Checks cover the strategy version, matching instrument/quote symbol, 5m candle
+identity, signal confirmation within 20 seconds, quote within 15 seconds and
+not before confirmation, a genuinely new signal after worker start, metadata
+receipt within 60 seconds and balance receipt within five seconds. Caller-supplied
+times/data require a future trusted runtime reader; freshness alone cannot prove
+correctness or account identity. Entry drift, including adverse tick rounding,
+must not exceed half ATR. Rounded stop distance must remain 0.2%–3% of modeled
+slipped entry. Zero/nonfinite amounts and invalid contract specifications reject.
+
+The entry anchor rounds adversely to tick size; the structural stop rounds
+outward. Contracts floor to lot size after taking the tightest cap of modeled
+fee/slippage-inclusive 0.5% equity loss, 10% equity margin at at most 3x leverage,
+available balance including entry fee, and required `maxMktSz`/`maxStopSz` metadata.
+If this cannot fund `minSz`, no upward rounding or order is allowed. Returned
+base-coin quantity is reported separately. No existing paper sizing rule changes.
+
+The initial TP remains exactly 2R from the rounded planning anchor, matching the
+existing offline demo planner. Market fill price is unknown; this is **not** proof
+of exact 2R from a future actual fill. Runtime fill-price risk/protection checks,
+rejection/repair of excessive slippage, daily limits/cooldown, admission/lease,
+metadata changes and execution-time revalidation remain necessary. The returned
+expiry is a diagnostic bound, not an enforced exchange deadline or permission.
+
+Local acceptance: 11 new bridge cases plus the existing 25 offline demo cases
+passed. The integration test launches the actual JS engine with synthetic long
+and short candle sequences, feeds both output signals into Python sizing, checks
+risk bounds and persists/reopens the resulting order intent to test no-repeat
+dispatch. Five symbols use synthetic matching contract metadata, not claims of
+current exchange contract values. Nothing was submitted to OKX or deployed to
+Cloud Run/the VM. Backend CI pins Node 22 for the cross-language test and now also
+runs when the shared strategy engine changes.
+
+```sh
+# From repository root, no external Python dependencies required:
+PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_strategy_bridge.py' -v
+PYTHONPATH=backend python -m unittest discover -s backend/tests -p 'test_okx_demo_*.py' -v
+```
