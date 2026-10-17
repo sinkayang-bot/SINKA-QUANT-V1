@@ -16,6 +16,7 @@ from okx_reconcile import number
 from okx_risk import SYMBOLS, positive
 from okx_strategy_bridge import timestamp
 
+PENDING_ALGO_STATES=frozenset({'live','pause','partially_effective','partially_failed'})
 
 class DemoSnapshotError(RuntimeError):
     pass
@@ -87,7 +88,7 @@ class DemoSnapshotReader:
                             or (row["state"] == "partially_filled" and filled <= 0)):
                         raise ValueError("Inconsistent pending entry")
                 elif kind == "algos":
-                    if row.get("ordType") != algo_type or row.get("state") not in {"live", "partially_effective"}:
+                    if row.get("ordType") != algo_type or row.get("state") not in PENDING_ALGO_STATES:
                         raise ValueError("Inconsistent pending algo")
                 else:
                     key = (row.get("instId"), digits(row.get("tradeId")))

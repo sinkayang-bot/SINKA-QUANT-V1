@@ -6,7 +6,7 @@
 
 ## 先只讀檢查
 
-在已登入 `sinka-quant` 的一般 Cloud Shell，儲存庫根目錄執行：
+在已登入 `sinka-quant` 的一般 Cloud Shell，使用 Python 3.11 以上，儲存庫根目錄執行：
 
 ```sh
 python3 -m venv "$HOME/sinka-demo-venv"
@@ -51,6 +51,13 @@ python3 -m venv "$HOME/sinka-demo-venv"
 `demo_pending_algos_trigger_read_failed_http_429`。這些診斷只探測第一頁以確認
 拒絕類型與錯誤碼，不提供完整庫存證明。拒絕、逾時或未知類型不會被當成空清單，
 也不會跳過原本的完整讀取要求。
+若各類第一頁 API 均成功但整體庫存驗證失敗，`algo_diagnostics` 一次提供 Python
+版本、固定錯誤類別、各類型的第一頁／完整掃描數量、狀態分類、缺失欄位及跨類型
+重複數。不輸出任何 UID、委託 ID、產品 ID、數量、價格或原始回應字串。
+官方合法的 pending 狀態 `pause`、`partially_failed` 與 `partially_effective`
+會被保留為未解決庫存，不能被當作有效保護或平倉基線；不會因讀取成功而允許新倉。
+Python 的 TaskGroup／timeout 功能若不可用，會在讀 Secret 前停止，顯示
+`python_3_11_or_newer_required`。
 HTTP 狀態及數字 API code 可供診斷；回應原文、標頭及憑證不輸出。程式不會為了
 通過檢查而自行變更任何帳戶設定，也不會重新建立帳本或綁定。
 

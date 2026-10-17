@@ -195,3 +195,44 @@ def test_algo_http_failure_retains_type_and_status_only(monkeypatch):
     with pytest.raises(setup.SetupBlocked) as caught:
         asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
     assert str(caught.value)=='demo_pending_algos_trigger_read_failed_http_429'
+
+
+def test_diagnostics_disclose_shape_not_ids_sizes_or_private_payload(monkeypatch):
+    fixture=Fixture(); fixture.balance['details'][0]['cashBal']='10000'
+    fixture.algos['oco']=[dict(algoId='777123456',instId='BTC-USDT-SWAP',ordType='oco',state='unsupported-private-state',sz='12345.6789')]
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
+    report=caught.value.diagnostics
+    assert report['types']['oco']['scan']=='type_or_state_mismatch'
+    assert report['types']['oco']['states']==['missing_or_other']
+    assert report['types']['oco']['first_page_count']==1
+    for private in ('777123456','12345.6789','unsupported-private-state','BTC-USDT-SWAP'):
+        assert private not in json.dumps(report)
+
+
+def test_cross_type_duplicate_is_diagnosed_without_exposing_identity(monkeypatch):
+    fixture=Fixture(); fixture.balance['details'][0]['cashBal']='10000'
+    for kind in ('oco','conditional'):
+        fixture.algos[kind]=[dict(algoId='777123456',instId='BTC-USDT-SWAP',ordType=kind,state='live')]
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
+    assert caught.value.diagnostics['duplicate_ids_across_types']==1
+    assert '777123456' not in json.dumps(caught.value.diagnostics)
+
+
+def test_old_python_is_blocked_before_storage_or_secrets(monkeypatch,capsys):
+    monkeypatch.setattr(setup.sys,'version_info',(3,10,12))
+    monkeypatch.setattr(setup,'credentials',lambda:pytest.fail('Secret accessed'))
+    monkeypatch.setattr(setup,'persistent_storage',lambda path:pytest.fail('Storage modified'))
+    assert setup.main(['--check'])==2
+    assert json.loads(capsys.readouterr().out)['reason']=='python_3_11_or_newer_required'
+
+
+def test_paused_order_still_prevents_first_account_binding(monkeypatch):
+    fixture=Fixture(); fixture.balance['details'][0]['cashBal']='10000'
+    fixture.algos['oco']=[dict(algoId='777',instId='BTC-USDT-SWAP',ordType='oco',state='pause')]
+    monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
+    with pytest.raises(setup.SetupBlocked,match='first_binding_requires_flat_clean_account'):
+        asyncio.run(setup.account_check(DemoCredentials('test','test','test')))

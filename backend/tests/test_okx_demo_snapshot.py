@@ -172,6 +172,14 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         for kind in ALGO_TYPES[:2]: f.algos[kind] = [dict(algoId="1", instId="BTC-USDT-SWAP", ordType=kind, state="live")]
         with self.assertRaises(DemoSnapshotError): await f.reader().collect()
 
+    async def test_paused_and_partially_failed_algos_are_retained_as_unresolved_inventory(self):
+        for state in ('pause','partially_failed'):
+            f=Fixture()
+            f.algos['oco']=[dict(algoId='777',instId='BTC-USDT-SWAP',ordType='oco',state=state)]
+            snapshot=await f.reader().collect()
+            self.assertEqual(snapshot['pending_algos'][0]['state'],state)
+            self.assertFalse(snapshot['fill_audit_ready'])
+
     async def test_changed_account_groups_reject_whole_snapshot_and_clear_cache(self):
         for endpoint in ("/balance", "/positions", "/orders-pending", "/orders-algo-pending", "/leverage-info", "/instruments", "/config", "/fills"):
             f = Fixture(); reader = f.reader()

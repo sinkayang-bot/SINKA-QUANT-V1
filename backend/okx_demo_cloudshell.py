@@ -13,9 +13,10 @@ from pathlib import Path
 import re
 import sqlite3
 import subprocess
+import sys
 import time
 
-from okx_demo_snapshot import DemoSnapshotReader,digits
+from okx_demo_snapshot import DemoSnapshotReader,digits,PENDING_ALGO_STATES
 from okx_demo_transport import DemoCredentials,OKXDemoReadTransport,DemoTransportError
 from okx_demo_trading_worker import execute
 from okx_reconcile import number
@@ -29,7 +30,58 @@ SYMBOL='BTC-USDT-SWAP'
 
 
 class SetupBlocked(RuntimeError):
-    pass
+    def __init__(self,reason,*,diagnostics=None):
+        super().__init__(reason)
+        self.diagnostics=diagnostics
+
+
+async def algo_diagnostics(reader,transport,error):
+    """Fixed labels/counts only. Never emit account IDs, order IDs, sizes or prices."""
+    errors={
+        'Invalid response identity':'invalid_identity',
+        'Oversized inventory page':'oversized_page',
+        'Duplicate or regressing inventory cursor':'duplicate_or_regressing_cursor',
+        'Inventory instrument missing':'missing_instrument',
+        'Inconsistent pending algo':'type_or_state_mismatch',
+        'Inventory exceeds scan bound':'inventory_bound_exceeded',
+        'Missing terminal inventory page':'terminal_page_missing',
+    }
+    def causes(value):
+        children=getattr(value,'exceptions',None)
+        if children is not None:
+            return sorted({name for child in children for name in causes(child)})
+        name=type(value).__name__
+        return [name if name in {'AttributeError','TypeError','ValueError','TimeoutError','DemoTransportError'} else 'other']
+    report={'python_version':'.'.join(map(str,sys.version_info[:3])),
+            'group_error_types':causes(error),'types':{},'duplicate_ids_across_types':0}
+    seen=set()
+    for kind in ALGO_TYPES:
+        info={}; report['types'][kind]=info
+        try:
+            response=await transport.account_read('algos',algo_type=kind)
+            code=response.get('code')
+            info['api_code']=code if isinstance(code,str) and re.fullmatch(r'[0-9]{1,8}',code) else 'unknown'
+            if code!='0': continue
+            rows=response.get('data',[])
+            info['first_page_count']=len(rows)
+            info['states']=sorted({row.get('state') if row.get('state') in PENDING_ALGO_STATES else 'missing_or_other' for row in rows})
+            info['returned_types']=sorted({row.get('ordType') if row.get('ordType') in ALGO_TYPES else 'missing_or_other' for row in rows})
+            info['missing_instrument_count']=sum(not bool(row.get('instId')) for row in rows)
+            try:
+                complete=await reader._scan('algos',algo_type=kind)
+                info['scan']='verified'
+                info['total_count']=len(complete)
+                identities={row['algoId'] for row in complete}
+                report['duplicate_ids_across_types']+=len(identities&seen)
+                seen|=identities
+            except ValueError as failure:
+                info['scan']=errors.get(failure.args[0] if failure.args else '', 'schema_or_read_failed')
+        except DemoTransportError as failure:
+            info['scan']='transport_failed'
+            info['http_status']=failure.http_status
+        except Exception:
+            info['scan']='schema_or_read_failed'
+    return report
 
 
 def command(args):
@@ -161,18 +213,18 @@ async def account_check(creds,binding=None):
         stage='demo_pending_algos_inventory_invalid'
         try:
             await reader._algos()
-        except Exception:
+        except Exception as group_error:
             # Diagnose the failed group without treating any rejected type as empty.
             # These first-page probes grant no completeness proof or trading authority.
-            for kind in ALGO_TYPES:
-                stage='demo_pending_algos_'+kind+'_read_failed'
-                response=await transport.account_read('algos',algo_type=kind)
-                code=response.get('code')
-                if code!='0':
-                    suffix=code if isinstance(code,str) and re.fullmatch(r'[0-9]{1,8}',code) else 'unknown'
-                    raise SetupBlocked('demo_pending_algos_'+kind+'_api_rejected_code_'+suffix)
-            stage='demo_pending_algos_rows_or_pagination_invalid'
-            raise ValueError()
+            details=await algo_diagnostics(reader,transport,group_error)
+            for kind,info in details['types'].items():
+                code=info.get('api_code')
+                if code is not None and code!='0':
+                    raise SetupBlocked('demo_pending_algos_'+kind+'_api_rejected_code_'+code,diagnostics=details)
+                status=info.get('http_status')
+                if status is not None:
+                    raise SetupBlocked('demo_pending_algos_'+kind+'_read_failed_http_'+str(status),diagnostics=details)
+            raise SetupBlocked('demo_pending_algos_rows_or_pagination_invalid',diagnostics=details)
         stage='demo_recent_fills_inventory_invalid'
         await reader._scan('fills')
         stage='demo_full_snapshot_inconsistent_or_expired'
@@ -223,6 +275,8 @@ def main(argv=None):
     if not args.check and not args.run:
         print(json.dumps(result,sort_keys=True)); return 0
     try:
+        if sys.version_info<(3,11) or not hasattr(asyncio,'TaskGroup') or not hasattr(asyncio,'timeout'):
+            raise SetupBlocked('python_3_11_or_newer_required')
         root=Path.home()/'sinka-demo-trial'
         persistent_storage(root)  # Reject ephemeral storage before reading any Secret.
         creds=credentials()
@@ -245,6 +299,7 @@ def main(argv=None):
             result.update(phase='trial_finished',worker=worker)
     except SetupBlocked as error:
         result.update(phase='blocked',reason=error.args[0]); code=2
+        if error.diagnostics is not None: result['algo_diagnostics']=error.diagnostics
     except KeyboardInterrupt:
         result.update(phase='interrupted_reconciliation_required'); code=130
     except Exception:
