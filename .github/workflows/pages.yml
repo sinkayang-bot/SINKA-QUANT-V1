@@ -29,8 +29,8 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Verify bounded VM deployment checks
         run: |
-          python3 -m unittest discover -s tests -p test_vm_verify.py
-          bash -n firebase/deploy-paper-vm.sh worker/vm-startup.sh
+          python3 -m unittest discover -s tests -p 'test_vm_*.py'
+          bash -n firebase/deploy-paper-vm.sh firebase/verify-paper-vm-restart.sh worker/vm-startup.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

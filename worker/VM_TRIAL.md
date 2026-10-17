@@ -105,3 +105,35 @@ arguments. Python tests distinguish boot/configuration from current worker
 health and sanitize log payloads. Real cloud resource creation and actual
 provider STOP/persistence behavior are still **unverified** until the approved
 Cloud Shell trial is executed.
+
+## One stop/start persistence acceptance on the existing VM
+
+`firebase/verify-paper-vm-restart.sh` defaults to a no-op plan. After authorizing
+this persistence check under the same trial budget, invoke it with
+`--run-authorized-trial` from authenticated Cloud Shell. It never creates,
+deletes, updates metadata, or changes scheduling on any resource.
+
+It captures the existing VM ID, retained boot-disk ID/creation timestamp and
+last persisted worker revision/trade count before stopping. If no valid
+checkpoint evidence exists it refuses to restart. It stops the existing VM
+if needed and starts that same VM once. A new start incurs compute/network
+usage and starts a new 30-minute provider runtime limit; it is not an extension
+to indefinite runtime or a new paid resource. The retained disk keeps billing.
+
+Acceptance requires the same VM/disk, the same bounded configuration, a new
+boot event, a checkpoint revision that did not reset, no reduction in closed
+trade count, and a fresh post-restart public quote. Old serial events do not
+prove a new boot. If an open position was restored, recovery may intentionally
+paper-flatten it and stop new entries; that is reported separately from an
+active waiting worker. No exchange orders are involved.
+
+This is evidence of checkpoint/disk continuity, not proof that the strategy is
+profitable. If the account has zero closed trades, it does not establish cloud
+recovery of a completed trade; that remains covered only by the synthetic/local
+ledger tests until paper trades occur in the cloud.
+
+The script waits up to five minutes for the new bootstrap, then stops the VM
+on failed/timed-out acceptance, retaining data. Output has
+`restart_acceptance_complete: true` only when all required evidence is present.
+The actual cloud stop/start test is pending operator execution; mocked gcloud
+and deterministic comparison tests are not represented as cloud acceptance.

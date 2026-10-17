@@ -4,22 +4,7 @@ import sys
 from datetime import datetime, timezone
 
 
-def verify(instance, serial, now=None):
-    now = now or datetime.now(timezone.utc)
-    expected_network = "/global/networks/sinka-paper-trial-net"
-    scheduling = instance.get("scheduling", {})
-    disks = instance.get("disks", [])
-    duration = scheduling.get("maxRunDuration", {}).get("seconds")
-    checks = {
-        "expected_name": instance.get("name") == "sinka-paper-trial",
-        "expected_machine": instance.get("machineType", "").endswith("/machineTypes/e2-micro"),
-        "stop_after_30_minutes": str(duration) == "1800" and scheduling.get("instanceTerminationAction") == "STOP",
-        "automatic_restart_disabled": scheduling.get("automaticRestart") is False,
-        "no_service_account": not instance.get("serviceAccounts"),
-        "persistent_boot_disk": len(disks) == 1 and disks[0].get("boot") is True and disks[0].get("autoDelete") is False,
-        "isolated_network": len(instance.get("networkInterfaces", [])) == 1 and instance["networkInterfaces"][0].get("network", "").endswith(expected_network),
-        "paper_trial_label": instance.get("labels", {}).get("sinka-purpose") == "paper-trial",
-    }
+def parse_events(serial):
     statuses = {"idle", "starting", "waiting_signal", "position_open", "daily_halt", "paused", "closing", "interrupted", "market_error", "missing_bars", "storage_error", "recovery_pending", "recovered", "closed"}
     events = []
     for line in serial.splitlines():
@@ -41,9 +26,31 @@ def verify(instance, serial, now=None):
             # No amounts, instruments, account identifiers, raw errors or extra fields.
             event = {k: row[k] for k in ("status", "active", "positionOpen", "closedTrades", "quoteFresh")}
             event["at"] = at.isoformat()
+            if type(row.get("revision")) is int and row["revision"] > 0:
+                event["revision"] = row["revision"]
             events.append(event)
         except (ValueError, TypeError, KeyError):
             continue
+    return events
+
+
+def verify(instance, serial, now=None):
+    now = now or datetime.now(timezone.utc)
+    expected_network = "/global/networks/sinka-paper-trial-net"
+    scheduling = instance.get("scheduling", {})
+    disks = instance.get("disks", [])
+    duration = scheduling.get("maxRunDuration", {}).get("seconds")
+    checks = {
+        "expected_name": instance.get("name") == "sinka-paper-trial",
+        "expected_machine": instance.get("machineType", "").endswith("/machineTypes/e2-micro"),
+        "stop_after_30_minutes": str(duration) == "1800" and scheduling.get("instanceTerminationAction") == "STOP",
+        "automatic_restart_disabled": scheduling.get("automaticRestart") is False,
+        "no_service_account": not instance.get("serviceAccounts"),
+        "persistent_boot_disk": len(disks) == 1 and disks[0].get("boot") is True and disks[0].get("autoDelete") is False,
+        "isolated_network": len(instance.get("networkInterfaces", [])) == 1 and instance["networkInterfaces"][0].get("network", "").endswith(expected_network),
+        "paper_trial_label": instance.get("labels", {}).get("sinka-purpose") == "paper-trial",
+    }
+    events = parse_events(serial)
     latest = events[-1] if events else None
     fresh = False
     if latest:

@@ -1,9 +1,9 @@
 name: Frontend read-only auth tests
 on:
   push:
-    paths: ['*.mjs', 'strategy/**', 'worker/**', 'firebase/deploy-paper-vm.sh', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'worker/**', 'firebase/deploy-paper-vm.sh', 'firebase/verify-paper-vm-restart.sh', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
   pull_request:
-    paths: ['*.mjs', 'strategy/**', 'worker/**', 'firebase/deploy-paper-vm.sh', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
+    paths: ['*.mjs', 'strategy/**', 'worker/**', 'firebase/deploy-paper-vm.sh', 'firebase/verify-paper-vm-restart.sh', 'index.html', 'tests/**', '.github/workflows/frontend-tests.yml']
 permissions:
   contents: read
 jobs:
@@ -17,8 +17,8 @@ jobs:
       - run: node --check auth-web.mjs
       - run: for file in strategy/*.mjs worker/*.mjs; do node --check "$file"; done
       - run: node --test tests/*.test.mjs
-      - run: python3 -m unittest discover -s tests -p test_vm_verify.py
-      - run: bash -n firebase/deploy-paper-vm.sh worker/vm-startup.sh
+      - run: python3 -m unittest discover -s tests -p 'test_vm_*.py'
+      - run: bash -n firebase/deploy-paper-vm.sh firebase/verify-paper-vm-restart.sh worker/vm-startup.sh
 
   paper-worker-image:
     runs-on: ubuntu-latest
