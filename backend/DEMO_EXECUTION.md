@@ -1,6 +1,6 @@
 # OKX demo execution development — offline only
 
-`okx_demo_intent.py` is a new, isolated building block. It is not wired into
+`okx_demo_intent.py` and `okx_demo_protection.py` are isolated building blocks. It is not wired into
 any HTTP API, container, deployment script, paper worker or read-only adapter.
 It has no network transport, credentials, environment credential lookup, submit
 method or journal unlock. Its outputs cannot authorize exchange execution.
@@ -30,7 +30,7 @@ Implemented:
 
 Not implemented or enabled:
 
-- No exchange writes, actual demo order, protective-order verification/repair,
+- No exchange writes, actual demo order, live protective-order collection/repair,
   cancellation of an unfilled remainder, emergency reduce-only exit, automatic
   journal release, strategy-to-contract sizing bridge or continuous demo runner.
 - This journal is not a distributed account lock or a substitute for existing
@@ -43,8 +43,8 @@ Not implemented or enabled:
 Offline validation (from `backend/`):
 
 ```sh
-python -m unittest discover -s tests -p test_okx_demo_intent.py -v
-python -m pytest -q tests/test_okx_demo_intent.py tests/test_okx_orders.py tests/test_okx_risk.py tests/test_okx_instruments.py
+python -m unittest discover -s tests -p 'test_okx_demo_*.py' -v
+python -m pytest -q tests/test_okx_demo_intent.py tests/test_okx_demo_protection.py tests/test_okx_orders.py tests/test_okx_risk.py tests/test_okx_instruments.py
 ```
 
 Observed locally: 44 tests plus 21 subtests passed. The existing backend CI
@@ -53,3 +53,44 @@ collects this unittest file through pytest automatically.
 Official API reference consulted 2026-10-17:
 https://www.okx.com/docs-v5/en/ (demo header, client IDs, attached TP/SL).
 This is development progress, not a claim of profitable or production-ready trading.
+
+
+## Protection and recovery assessment
+
+The offline assessor compares independent entry, positions, pending normal orders
+and pending algo snapshots. The caller must attest to the same verified demo
+account/session, complete pagination of account scope (not tracked-ID-only scans),
+local receive times no older than five seconds, and at most two seconds between
+snapshot receipt times. API order creation/update times are not freshness proof.
+These fields are trusted-reader inputs, not cryptographic evidence; no reader
+has been wired to this module. Concurrent exchange changes still require repeated
+reconciliation, and this assessment never grants entry/submission authority.
+
+Supported protection is deliberately narrow: one live OCO, fixed contract size
+exactly equal to the signed net isolated position/entry fills, opposite exit side,
+explicit reduce-only, matching planned last-price TP/SL triggers and market exits.
+Split targets, one-way conditional, trailing, full-position-fraction and ambiguous
+algos fail closed rather than being counted as equivalent. Triggered/non-live
+algos require child-order/fill reconciliation before considering another exit;
+no duplicate emergency close is generated. An entry's attached bracket fields
+alone never satisfy this test.
+
+Partial fills can be marked protected only for the currently observed size;
+remaining entry quantity still requires cancellation and another complete read.
+Flat exposure does not unlock: exit-fill audit and orphan-algo cleanup remain
+required. Extra positions, extra pending orders and foreign/duplicate algos block.
+Malformed/stale data yields a sanitized halt/refresh recommendation, not raw
+exchange content or an executable request. Fault handling currently produces
+recovery recommendations only; actual repair/cancel/emergency-exit execution
+is not implemented or enabled.
+
+`DemoIntentStore.protection_report` binds assessment to the persisted plan and
+last observed exchange order identity/fill state, survives reopen, and neither
+changes the dispatch reservation nor releases the entry block. A caller must
+persist a matching current entry observation before assessing fresh snapshots.
+
+Validation: 25 standard-library unittest cases pass, covering both demo modules,
+with parameterized subtests for stale/malformed data, incorrect protection,
+partial/canceled fills, long/short sides, unexpected exposure, triggered algos,
+orphan cleanup, and persistent identity binding. Existing CI also collects these
+via pytest. No OKX request was made during these tests.

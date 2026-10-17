@@ -167,3 +167,23 @@ class DemoIntentStore:
                 action = "verify_flat_and_cleanup_before_any_new_intent"
         return {"submission_enabled": False, "new_entry_allowed": False,
                 "next_action": action}
+
+
+    def protection_report(self, client_id, evidence, *, now_ms):
+        """Offline assessment bound to the journal's last observed entry.
+
+        No automatic release, submission, repair or account read is performed.
+        The caller must first persist a fresh matching order observation.
+        """
+        from okx_demo_protection import assess_recovery, report
+        record = self.db.execute(
+            "SELECT plan,dispatched,snapshot FROM demo_intent WHERE id=?", (client_id,)).fetchone()
+        if not record or record[1] != 1 or not record[2]:
+            return report("intent_not_observed", "halt_entries", "query_entry_no_resubmit")
+        try:
+            rows = evidence["entry"]["rows"]
+            if len(rows) != 1 or parse_order(rows[0]) != parse_order(json.loads(record[2])):
+                return report("journal_entry_mismatch", "halt_entries", "refresh_and_reconcile_no_resubmit")
+            return assess_recovery(json.loads(record[0]), evidence, now_ms=now_ms)
+        except (ValueError, TypeError, KeyError, IndexError):
+            return report("invalid_or_stale_evidence", "halt_entries", "refresh_and_reconcile_no_resubmit")
