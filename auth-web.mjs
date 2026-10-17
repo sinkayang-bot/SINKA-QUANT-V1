@@ -1,8 +1,8 @@
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
-import {createStatusSession} from './readonly-session.mjs?v=countdown-1';
-import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=privacy-1';
-import {createAssetsSession} from './readonly-assets.mjs?v=countdown-1';
-import {renderAssets} from './assets-view.mjs?v=privacy-1';
+import {createStatusSession} from './readonly-session.mjs?v=clear-1';
+import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=clear-1';
+import {createAssetsSession} from './readonly-assets.mjs?v=clear-1';
+import {renderAssets} from './assets-view.mjs?v=clear-1';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
@@ -99,6 +99,10 @@ logout.addEventListener('click', async () => {
 });
 refresh.addEventListener('click', () => {if(assetsSession.getState().phase!=='checking')session.refresh();});
 $('asset-refresh')?.addEventListener('click',()=>{if(session.getState().phase!=='checking')assetsSession.refresh();});
+$('owner-clear-results')?.addEventListener('click',()=>{
+  session.clearResults();assetsSession.clearResults();updateValidityCountdown();
+  if(diagnosticNotice)diagnosticNotice.textContent='已清除本次查詢結果並取消尚未完成的查詢；登入狀態保留。';
+});
 $('asset-full-precision')?.addEventListener('change',()=>renderAssets(assetsSession.getState(),messages));
 $('asset-hide-details')?.addEventListener('change',()=>renderAssets(assetsSession.getState(),messages));
 $('owner-copy-diagnostic')?.addEventListener('click', async () => {

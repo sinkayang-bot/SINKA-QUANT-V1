@@ -139,3 +139,28 @@ test('an early platform timer cannot strand a verified indicator after its deadl
   h.setTime(START+30000);finalTimer.fn();assert.equal(h.s.getState().phase,'expired');
   assert.equal(h.calls.length,1);
 });
+
+test('manual clearing removes evidence and timers, retains login without another request',async()=>{
+  const h=setup();h.s.setUser(h.user);await h.s.refresh();
+  h.s.clearResults();
+  assert.deepEqual(h.s.getState(),{phase:'signed_in',verified:false});
+  assert.equal(h.timers.size,0);assert.equal(h.calls.length,1);
+  await h.s.refresh();assert.equal(h.calls.length,2);assert.equal(h.s.getState().verified,true);
+});
+test('manual clearing aborts in-flight response and ignores its late completion',async()=>{
+  let complete,signal;
+  const h=setup({fetcher:(_url,options)=>{signal=options.signal;return new Promise(resolve=>{complete=resolve;});}});
+  h.s.setUser(h.user);const pending=h.s.refresh();await Promise.resolve();await Promise.resolve();
+  h.s.clearResults();assert.equal(signal.aborted,true);
+  complete({ok:true,json:async()=>payload()});await pending;
+  assert.deepEqual(h.s.getState(),{phase:'signed_in',verified:false});assert.equal(h.timers.size,0);
+});
+test('manual clearing during token refresh never sends its eventual token',async()=>{
+  let resolveToken;const h=setup();h.s.setUser({getIdToken:()=>new Promise(resolve=>{resolveToken=resolve;})});
+  const pending=h.s.refresh();h.s.clearResults();resolveToken('private-token');await pending;
+  assert.equal(h.calls.length,0);assert.deepEqual(h.s.getState(),{phase:'signed_in',verified:false});
+});
+test('manual clearing while signed out preserves signed-out state',()=>{
+  const h=setup();h.s.clearResults();assert.deepEqual(h.s.getState(),{phase:'signed_out',verified:false});
+  assert.equal(h.calls.length,0);
+});

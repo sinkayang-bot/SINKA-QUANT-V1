@@ -115,6 +115,6 @@ export function createStatusSession({baseUrl = null, fetcher = fetch, onChange,
       if (version === generation && state.phase === 'checking') publish('timeout', {failureStage, httpStatus});
     }
   }
-  return {setUser, refresh, checkExpiry, getState: () => {checkExpiry(); return {...state};},
+  return {setUser, clearResults: () => setUser(user), refresh, checkExpiry, getState: () => {checkExpiry(); return {...state};},
     getRemainingMs:()=>{checkExpiry();return remainingMs();}};
 }

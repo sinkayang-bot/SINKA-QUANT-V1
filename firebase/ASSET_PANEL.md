@@ -120,3 +120,9 @@ beyond the existing three secret bindings and Firebase revoked-session reader.
 Sources: [OKX API v5](https://www.okx.com/docs-v5/en/) account balance, account
 positions and standard pending-order definitions. USD total equity must not be
 labeled USDT; SWAP size/fill fields are contracts, not coin quantities.
+
+The "立即清除查詢結果" button clears both status and asset evidence, expiry
+timers, displayed financial rows and diagnostic text, while retaining Google
+sign-in. It aborts pending requests and invalidates their generation so late
+responses cannot restore data. Clearing itself performs no API or token request;
+subsequent queries remain explicit manual actions.
