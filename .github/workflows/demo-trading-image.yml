@@ -1,0 +1,44 @@
+name: Demo trading image
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - 'strategy/**'
+      - '.github/workflows/demo-trading-image.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'strategy/**'
+      - '.github/workflows/demo-trading-image.yml'
+permissions:
+  contents: read
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f backend/Dockerfile.okx-demo-trading -t sinka-demo-trading:ci .
+      - name: Confirm Node runtime and default-off worker without networking
+        run: |
+          docker run --rm --network none --read-only sinka-demo-trading:ci node --version
+          docker run --rm --network none --read-only sinka-demo-trading:ci > "$RUNNER_TEMP/disabled.json"
+          python - "$RUNNER_TEMP/disabled.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1]))
+          assert result['phase']=='disabled'
+          assert result['live_trading_enabled'] is False
+          assert result['automatic_runtime_ready'] is False
+          PY
+      - name: Explicit startup without server configuration must fail safely
+        run: |
+          set +e
+          docker run --rm --network none --read-only -e RUN_DEMO_TRADING=1 -e DEMO_TRADING_AUTHORIZED=1 sinka-demo-trading:ci > "$RUNNER_TEMP/missing.json"
+          code=$?
+          set -e
+          test "$code" = 2
+          python - "$RUNNER_TEMP/missing.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1]))
+          assert result['phase']=='configuration_missing'
+          assert result['live_trading_enabled'] is False
+          PY
