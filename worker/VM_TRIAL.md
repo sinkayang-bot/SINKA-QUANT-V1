@@ -1,7 +1,9 @@
-# Bounded Google Cloud paper-worker trial — not deployed
+# Bounded Google Cloud paper-worker trial — startup verified
 
-Prepared for `sinka-quant`, `asia-east1-b`. This is a reviewable deployment
-candidate requiring approval of **new billable resources**. It does not replace
+Prepared for `sinka-quant`, `asia-east1-b`. The owner executed the approved
+pinned deployment and supplied a successful startup-verification screenshot
+on 2026-10-17. The original cost/resource plan below is retained for review.
+This trial does not replace
 or modify the existing Cloud Run status service or either OKX read-only job.
 The agent cannot currently access Cloud Console and has no authenticated gcloud
 installation; the final invocation must run in the owner's authenticated Cloud
@@ -102,9 +104,9 @@ this script, since that destroys the test ledger and requires an explicit choice
 Local Node tests cover the no-op default, strict approval flag, checksummed
 startup rendering, resource-name collisions and all mocked gcloud creation
 arguments. Python tests distinguish boot/configuration from current worker
-health and sanitize log payloads. Real cloud resource creation and actual
-provider STOP/persistence behavior are still **unverified** until the approved
-Cloud Shell trial is executed.
+health and sanitize log payloads. Cloud resource creation and active/public-quote startup were verified in the
+owner screenshot. Actual provider STOP and stop/start persistence behavior
+remain **unverified** pending the next Cloud Shell acceptance.
 
 ## One stop/start persistence acceptance on the existing VM
 
@@ -137,3 +139,14 @@ on failed/timed-out acceptance, retaining data. Output has
 `restart_acceptance_complete: true` only when all required evidence is present.
 The actual cloud stop/start test is pending operator execution; mocked gcloud
 and deterministic comparison tests are not represented as cloud acceptance.
+
+
+## Observed cloud startup evidence
+
+Owner screenshot received 2026-10-17 17:01 Asia/Taipei showed all configuration
+checks true, `vm_status=RUNNING`, an active `waiting_signal` worker with a fresh
+public quote, no open paper position and zero closed trades. The event time
+was `2026-10-17T09:00:41.585000+00:00`; `cloud_acceptance_complete=true` and
+`trading_enabled=false`. This proves bounded cloud startup, not 24-hour uptime,
+completed trades, profitability or successful restart recovery. No private OKX
+account values, identifiers or screenshot contents are copied to this report.

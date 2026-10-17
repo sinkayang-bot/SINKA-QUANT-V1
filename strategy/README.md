@@ -52,8 +52,9 @@ No automatic start on load. Browser shutdown is not a continuous worker.
 Existing manual paper and old backtest modules remain separate.
 
 A separate [persistent Node paper worker](../worker/README.md) now provides
-SQLite checkpoints and single-host process recovery. It is not deployed and
-does not change the browser-only account lifecycle above.
+SQLite checkpoints and single-host process recovery. A bounded GCP VM startup
+trial has been verified by the owner; it does not change the browser-only
+account lifecycle above or provide an always-on deployment.
 
 ## Replay assumptions and limitations
 

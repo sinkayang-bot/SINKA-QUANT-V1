@@ -1,7 +1,8 @@
 # Persistent paper strategy worker
 
 Runs the existing SNR-5M-1 research strategy as an independent Node process.
-This implements process-level persistence and recovery. It is **not deployed**,
+This implements process-level persistence and recovery. A bounded GCP VM
+trial startup has now been verified by the owner; it is not a 24-hour service,
 does not make the GitHub Pages tab run while closed, and does not enable any
 OKX demo/live order route. The strategy's first historical sample lost money;
 [the original acceptance result](../strategy/ACCEPTANCE.md) remains unchanged.
@@ -85,7 +86,8 @@ invented historical fill. No part of this lifecycle guarantees profitability.
 
 A separate [30-minute GCP VM trial proposal](VM_TRIAL.md) includes a default
 no-op deployment plan, source integrity checks and read-only cloud verification.
-It requires new cost approval and is not an executed deployment.
+Its original cost approval and startup verification are recorded there;
+cloud stop/start persistence acceptance remains pending.
 
 ## Verification
 
