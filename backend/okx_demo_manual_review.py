@@ -14,7 +14,7 @@ from decimal import Decimal, localcontext
 
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_fill_audit import encoded, key, money, normalize_fill
-from okx_demo_settlement import scan
+from okx_demo_settlement import scan,cash_matches,CASH_ROUNDING_TOLERANCE
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
 from okx_demo_protection import _plan_body
@@ -141,7 +141,9 @@ def assess(saved, bundle, entry, closing):
         checks['position_cash_returns_to_zero']=position_movement==0
         report['bill_fill_mismatches']=mismatches
         cash_delta=Decimal(money(snap['cash_balance_usdt']))-Decimal(saved['cash'])
-        checks['cash_matches_bills']=cash_delta==movement
+        checks['cash_matches_bills']=cash_matches(cash_delta,movement)
+        report['cash_bill_rounding_delta_usdt']=format(cash_delta-movement,'f')
+        report['cash_rounding_tolerance_usdt']=format(CASH_ROUNDING_TOLERANCE,'f')
         report.update(fill_count=len(active),bill_count=len(rows),
             position_cash_change_usdt=format(position_movement,'f'),position_transfer_bill_count=transfer_rows,
             fees_usdt=format(sum((Decimal(f['fee']) for f in active.values()),Decimal(0)),'f'),

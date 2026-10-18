@@ -108,6 +108,17 @@ class ManualCloseTests(unittest.TestCase):
         self.assertEqual(self.db.execute('SELECT day,entries FROM demo_daily').fetchall(),[(original_day,1)])
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
 
+    def test_strategy_cash_tail_archives_exact_original_amounts_and_explicit_delta(self):
+        from decimal import Decimal
+        self.strategy_reduction(legacy=True)
+        self.snapshot['cash_balance_usdt']=str(Decimal(self.snapshot['cash_balance_usdt'])-Decimal('0.0000000000000026'))
+        result=self.close()
+        self.assertTrue(result['ledger_archived'])
+        self.assertEqual(result['cash_bill_rounding_delta_usdt'],'-0.0000000000000026')
+        archive=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive').fetchone()[0])
+        self.assertEqual(archive['settlement']['net_usdt'],result['net_usdt'])
+        self.assertEqual(archive['settlement']['close_evidence']['snapshot']['cash_balance_usdt'],self.snapshot['cash_balance_usdt'])
+
     def test_strategy_cannot_adopt_untracked_close_or_changed_contract_model(self):
         self.strategy_reduction(legacy=True)
         original=deepcopy(self.closing);self.closing['clOrdId']=''

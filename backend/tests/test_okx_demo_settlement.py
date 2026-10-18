@@ -78,6 +78,18 @@ class SettlementTests(unittest.TestCase):
         self.assertEqual(Decimal(result['net_usdt']),Decimal(trade['trading_net_usdt']))
         self.assertEqual(result['funding_usdt'],'0')
 
+    def test_cash_rounding_tail_is_bounded_reported_and_never_replaces_original_bills(self):
+        snap,e,_,_,_=self.prepared('0')
+        original=Decimal(snap['cash_balance_usdt'])
+        snap['cash_balance_usdt']=str(original-Decimal('0.000000000002'))
+        self.reject(snap,e)
+        snap['cash_balance_usdt']=str(original-Decimal('0.0000000000000026'))
+        result=self.audit.settle(snap,e)
+        self.assertEqual(result['cash_bill_rounding_delta_usdt'],'-0.0000000000000026')
+        self.assertEqual(result['cash_rounding_tolerance_usdt'],'0.000000000001')
+        self.assertEqual(result['cash_after_usdt'],snap['cash_balance_usdt'])
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_account_bill').fetchone()[0],2)
+
     def isolated(self,evidence):
         for pages in evidence['passes']:
             for row in pages[0]['data']:

@@ -125,6 +125,22 @@ def test_missing_ledger_is_not_created(tmp_path):
     assert not path.exists()
 
 
+def test_exchange_decimal_tail_is_reported_but_missing_money_is_not_tolerated():
+    saved,bundle,entry,close=fixture()
+    bundle['snapshot']['recent_fills'][1]['fillPnl']='1.0000000000000026'
+    for pages in bundle['bills']['passes']:
+        pages[0]['data'][0].update(pnl='1.0000000000000026',balChg='0.9000000000000026')
+    result=assess(saved,bundle,entry,close)
+    assert result['evidence_matches']
+    assert result['cash_bill_rounding_delta_usdt']=='-0.0000000000000026'
+    assert result['cash_rounding_tolerance_usdt']=='0.000000000001'
+    bundle['snapshot']['cash_balance_usdt']='100.800000000002'
+    assert not assess(saved,bundle,entry,close)['evidence_matches']
+    bundle['snapshot']['cash_balance_usdt']='100.8'
+    bundle['bills']['passes'][1][0]['data'].pop()
+    with pytest.raises(ValueError): assess(saved,bundle,entry,close)
+
+
 def test_explicit_isolated_margin_changes_reconcile_only_when_returned_in_full():
     saved,bundle,entry,close=fixture()
     for pages in bundle['bills']['passes']:

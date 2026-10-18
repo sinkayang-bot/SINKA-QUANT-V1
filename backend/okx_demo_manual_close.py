@@ -17,7 +17,7 @@ from okx_demo_cycles import DemoCycleLifecycle
 from okx_demo_executor import DemoExecutionJournal
 from okx_demo_fill_audit import encoded, key, money
 from okx_demo_manual_review import assess, order_row, retained_in_transaction
-from okx_demo_settlement import scan
+from okx_demo_settlement import scan,cash_matches
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
 from okx_instruments import instrument_spec
@@ -99,7 +99,7 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 gross=(value(exited)-value(opened))*instrument_spec(snapshot['instrument'])['ct_val']*(1 if saved['body']['side']=='buy' else -1)
                 if (any(Decimal(f['fillPnl'])!=0 for f in opened)
                         or abs(gross-Decimal(report['realized_pnl_usdt']))>Decimal('0.00000001')
-                        or Decimal(report['cash_change_usdt'])!=Decimal(report['realized_pnl_usdt'])+Decimal(report['fees_usdt'])):
+                        or not cash_matches(report['cash_change_usdt'],Decimal(report['realized_pnl_usdt'])+Decimal(report['fees_usdt']))):
                     raise ValueError('Reported P&L does not match contract arithmetic')
             closed=max(int(f['fillTime']) for f in exited)
             self.authority.journal._observe_in_transaction(client,entry)
@@ -116,6 +116,8 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
                 test_roundtrip_verified=report['test_roundtrip_verified'],strategy_performance_sample=False,
                 instrument_context_source=spec_source,strategy_trade=strategy,
+                cash_bill_rounding_delta_usdt=report['cash_bill_rounding_delta_usdt'],
+                cash_rounding_tolerance_usdt=report['cash_rounding_tolerance_usdt'],
                 account_bills_audited=True,funding_audited=True,new_entry_allowed=False,submission_enabled=False,
                 close_evidence=dict(entry=entry,closing=closing,report=report,snapshot=snapshot,bills=bills,reduction_record=saved.get('reduction')))
             trade=dict(settlement,entry_order_id=saved['order_id'],child_order_id=closing['ordId'],
@@ -136,6 +138,8 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
                 test_roundtrip_verified=report['test_roundtrip_verified'],strategy_trade=strategy,
                 instrument_context_source=spec_source,strategy_performance_sample=False,
+                cash_bill_rounding_delta_usdt=report['cash_bill_rounding_delta_usdt'],
+                cash_rounding_tolerance_usdt=report['cash_rounding_tolerance_usdt'],
                 orders_sent=0,net_usdt=settlement['net_usdt'])
         except Exception:
             self.db.execute('ROLLBACK')

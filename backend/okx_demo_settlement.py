@@ -11,6 +11,15 @@ from okx_demo_close_audit import DemoClosedTradeAuditor, fixed
 from okx_demo_fill_audit import DemoFillAuditError, encoded, ident, money, MAX_AUDIT_GAP_MS
 from okx_strategy_bridge import timestamp
 
+# Strictly bounded exchange serialization tails, never a missing-bill allowance.
+CASH_ROUNDING_TOLERANCE=Decimal('0.000000000001')
+
+
+def cash_matches(left,right):
+    with localcontext() as ctx:
+        ctx.prec=512
+        return abs(Decimal(left)-Decimal(right))<=CASH_ROUNDING_TOLERANCE
+
 
 def bill(raw):
     if not isinstance(raw,dict) or raw.get('ccy')!='USDT' or raw.get('instType')!='SWAP':
@@ -133,12 +142,17 @@ class DemoSettlementAuditor(DemoClosedTradeAuditor):
             if seen!=set(fills): raise ValueError('Trade bill missing')
             net=Decimal(trade['trading_net_usdt'])+funding
             cash=Decimal(money(snapshot.get('cash_balance_usdt')))
-            if position_movement!=0 or movement!=net or cash-Decimal(baseline[0])!=movement:
+            cash_change=cash-Decimal(baseline[0])
+            if position_movement!=0 or not cash_matches(movement,net) or not cash_matches(cash_change,movement):
                 raise ValueError('USDT cash movement does not reconcile')
             result=dict(client_id=client_id,net_usdt=fixed(net),funding_usdt=fixed(funding),
                 cash_before_usdt=baseline[0],cash_after_usdt=fixed(cash),bill_ids=sorted(rows,key=int),
                 closed_at_ms=trade['closed_at_ms'],reconciled_through_ms=through,
                 funding_audited=True,account_bills_audited=True,new_entry_allowed=False,submission_enabled=False)
+            if cash_change!=movement or movement!=net:
+                result.update(cash_bill_rounding_delta_usdt=fixed(cash_change-movement),
+                    bill_model_rounding_delta_usdt=fixed(movement-net),
+                    cash_rounding_tolerance_usdt=fixed(CASH_ROUNDING_TOLERANCE))
         old_rows={r[0]:r[1] for r in self.db.execute('SELECT id,body FROM demo_account_bill')}
         if any(identity not in rows or encoded(rows[identity])!=body for identity,body in old_rows.items()):
             raise ValueError('Previously audited bill changed or disappeared')
