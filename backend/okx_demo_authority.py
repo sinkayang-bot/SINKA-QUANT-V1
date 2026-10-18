@@ -15,7 +15,7 @@ from okx_demo_intent import demo_plan
 from okx_instruments import instrument_spec
 from okx_reconcile import number
 from okx_risk import positive
-from okx_strategy_bridge import timestamp
+from okx_strategy_bridge import timestamp,execution_test_signal_id
 
 
 def day_key(now):
@@ -210,8 +210,9 @@ class DemoEntryAuthority:
         plan = candidate["plan"]
         body = plan["body"]
         testing=candidate.get('strategy')=='DEMO-EXECUTION-TEST-1'
+        cycle=self.db.execute('SELECT sequence FROM demo_cycle_state WHERE singleton=1').fetchone()[0] if cycles else 0
         if testing and (not self.execution_test_enabled or body['instId']!='BTC-USDT-SWAP'
-                or body['side']!='buy' or candidate.get('signal_id')!='once' or plan.get('purpose')!='execution_test'):
+                or body['side']!='buy' or candidate.get('signal_id')!=execution_test_signal_id(cycle) or plan.get('purpose')!='execution_test'):
             raise ValueError('Execution test not enabled')
         if (candidate.get("account_scope") != self.scope or candidate.get("strategy") not in {"SNR-5M-1","DEMO-EXECUTION-TEST-1"}
                 or candidate["symbol"] != snapshot["symbol"] or body["instId"] != snapshot["symbol"] or plan.get("environment") != "demo"

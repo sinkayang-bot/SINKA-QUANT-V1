@@ -132,10 +132,16 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
 TEST_VERSION = 'DEMO-EXECUTION-TEST-1'
 
 
+def execution_test_signal_id(cycle):
+    if type(cycle) is not int or not 0<=cycle<=1000000:
+        raise ValueError('Verified bounded test cycle required')
+    return 'once' if cycle==0 else 'cycle:'+str(cycle)
+
+
 def plan_execution_test(*, account_scope, strategy_version, symbol, signal,
                         quote, instrument, equity_usdt, available_usdt,
                         now_ms, started_at_ms, instrument_received_at_ms,
-                        balance_received_at_ms, leverage=3, demo=False):
+                        balance_received_at_ms, leverage=3, demo=False,test_cycle=0):
     """One explicit minimum-size BTC demo connectivity test, not an SNR signal."""
     if demo is not True or strategy_version!=TEST_VERSION or symbol!='BTC-USDT-SWAP' or signal is not None:
         raise ValueError('Explicit fixed demo execution test required')
@@ -154,7 +160,8 @@ def plan_execution_test(*, account_scope, strategy_version, symbol, signal,
         stop=align(anchor*Decimal('.99'),spec['tick_sz'],ROUND_FLOOR)
         target=anchor+2*(anchor-stop)
         qty=align(spec['min_sz'],spec['lot_sz'],ROUND_CEILING)
-        planned=demo_plan(account_scope=account_scope,signal_id=TEST_VERSION+':once',
+        signal_id=execution_test_signal_id(test_cycle)
+        planned=demo_plan(account_scope=account_scope,signal_id=TEST_VERSION+':'+signal_id,
             instrument=instrument,side='buy',contracts=qty,price=anchor,stop=stop,target=target,
             equity_usdt=equity,leverage=leverage,demo=True)
         planned['purpose']='execution_test'
@@ -166,7 +173,7 @@ def plan_execution_test(*, account_scope, strategy_version, symbol, signal,
                 or qty>positive(instrument.get('maxStopSz'),'stop maximum')):
             raise ValueError('Minimum contract exceeds execution-test risk cap')
         return dict(plan=planned,strategy=TEST_VERSION,symbol=symbol,account_scope=account_scope,
-            signal_id='once',signal_ready_at_ms=quote_time,
+            signal_id=signal_id,signal_ready_at_ms=quote_time,
             expires_at_ms=min(quote_time+15000,balance_received_at_ms+5000,instrument_received_at_ms+60000),
             sizing=dict(contracts=str(qty),base_quantity=str(qty*spec['ct_val']),entry_anchor=str(anchor),
                 modeled_margin_usdt=str(margin),modeled_entry_fee_usdt=str(fee),modeled_loss_usdt=planned['modeled_loss_usdt'],binding_cap='minimum_test_size'),

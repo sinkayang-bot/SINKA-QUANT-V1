@@ -14,6 +14,7 @@ from okx_demo_transport import OKXDemoReadTransport
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_close_reader import DemoCloseReader
+from okx_demo_cycles import unresolved_emergency_exit
 from okx_risk import SYMBOLS
 
 
@@ -159,7 +160,7 @@ class DemoTradingSupervisor:
                 if initial['phase'] not in {'baseline_initialized','idle_verified'}:
                     return initial
                 if not arm_entries: return outcome('verified_but_not_armed')
-                if self.session.db.execute('SELECT 1 FROM demo_emergency_exit').fetchone():
+                if unresolved_emergency_exit(self.session.db):
                     return outcome('emergency_exit_review_required')
                 owner.set_kill_switch(False)
             # Recovery after restart never implicitly clears a takeover kill switch.

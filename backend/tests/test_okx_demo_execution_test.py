@@ -1,5 +1,6 @@
 """Existing worker's explicitly enabled one-shot demo execution mode."""
 from copy import deepcopy
+import json
 import unittest
 from unittest.mock import patch
 from test_okx_demo_trading_supervisor import SupervisorTests
@@ -94,8 +95,27 @@ class ExecutionModeTests(SupervisorTests):
         self.assertEqual(self.f.posts,[])
         self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
 
+    async def test_caller_cannot_invent_a_new_cycle_to_bypass_replay_protection(self):
+        self.enable()
+        source=execution_source(); source['test_cycle']=999
+        result=await self.session.enter(source,execution_test=True)
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        plan=json.loads(self.journal.db.execute('SELECT plan FROM demo_intent').fetchone()[0])
+        reference=plan_execution_test(**execution_source())
+        self.assertEqual(plan['body']['clOrdId'],reference['plan']['body']['clOrdId'])
+
 
 class TestPlanTests(unittest.TestCase):
+    def test_each_completed_cycle_has_one_stable_test_identity(self):
+        source=execution_source()
+        first=plan_execution_test(**source)
+        second=plan_execution_test(**source,test_cycle=1)
+        self.assertEqual(second,plan_execution_test(**source,test_cycle=1))
+        self.assertNotEqual(first['plan']['body']['clOrdId'],second['plan']['body']['clOrdId'])
+        self.assertEqual(second['signal_id'],'cycle:1')
+        for invalid in (True,-1,'1',1000001):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                plan_execution_test(**source,test_cycle=invalid)
     def test_test_plan_is_distinct_minimal_and_stable_between_validation_calls(self):
         source=execution_source()
         first=plan_execution_test(**source)

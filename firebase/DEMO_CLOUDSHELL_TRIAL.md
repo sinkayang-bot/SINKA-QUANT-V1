@@ -1,5 +1,28 @@
 # Cloud Shell 人工限時驗收
 
+## 已人工平倉的測試單結案
+
+`--audit-trade` 只讀核對進場、人工平倉、完整雙次帳單及原始現金差額，不改帳本。
+`--close-reviewed-test` 會重新取得雙次完整證據；只有固定 BTC 模擬測試單、
+完整同向進場與反向 reduce-only 平倉、成交與帳單逐筆一致、原始合約規格及
+損益算式一致、現金吻合且逐倉現金全數退回才允許本地結案。只使用 GET，
+不建立交易 transport、不啟動策略、不修改雲端資源。
+
+```sh
+"$HOME/sinka-demo-venv/bin/python" backend/okx_demo_cloudshell.py --close-reviewed-test
+```
+
+結案在原有 SQLite 租約內以單一交易完成：原始帳本、現金基線、成交、完整帳單、
+原始進出場查詢證據和手動結案來源封存在既有雜湊鏈；風控進場次數保留，
+淨損益列入風控與冷卻期。中途失敗回滾，不留下半套結案，不刪帳本重來。
+停單開關仍開啟，`automatic_exit_verified` 和 `new_entry_allowed` 仍為 false。
+成功的 `manual_test_closed_and_archived` 只表示這筆手動平倉結案。
+
+後續明確執行 `--run --test-entry --seconds 90`，才允許下一筆最小規模模擬測試。
+測試識別碼取自已驗證的封存序號，每個週期固定一個，不接受隨機值或呼叫者
+指定序號繞過防重送；未結案先前委託仍只查詢恢復。日內次數、虧損、冷卻限制
+不會因測試而清除。封存前保留的緊急減倉 tombstone 也不刪除、不重送。
+
 這是模擬交易的短時間人工驗收，不是 24 小時託管。不改動既有 paper VM、
 唯讀服務、IAM、排程或 Secret；不建立計費 VM。Secret 存取仍依 Google Cloud
 原有計費及權限執行。只使用新的三個 `OKX_DEMO_TRADE_*` Secret。

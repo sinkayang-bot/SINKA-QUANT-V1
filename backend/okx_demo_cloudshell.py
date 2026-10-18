@@ -268,6 +268,7 @@ def main(argv=None):
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--run',action='store_true')
     modes.add_argument('--audit-trade',action='store_true',help='GET-only review of the retained test, manual close, fees and cash')
+    modes.add_argument('--close-reviewed-test',action='store_true',help='GET-only exchange reads and atomic local archival of the reviewed manual test close')
     parser.add_argument('--initialize-baseline',action='store_true')
     parser.add_argument('--recover-only',action='store_true',help='Recover the existing tracked intent without any new entry')
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
@@ -277,7 +278,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     result=dict(mode='demo_cloudshell_acceptance',phase='plan',secret_values_printed=False,
                 cloud_resources_changed=False,orders_enabled=False,live_trading_enabled=False)
-    if not args.check and not args.run and not args.audit_trade:
+    if not args.check and not args.run and not args.audit_trade and not args.close_reviewed_test:
         print(json.dumps(result,sort_keys=True)); return 0
     try:
         if sys.version_info<(3,11) or not hasattr(asyncio,'TaskGroup') or not hasattr(asyncio,'timeout'):
@@ -285,8 +286,18 @@ def main(argv=None):
         root=Path.home()/'sinka-demo-trial'
         persistent_storage(root)  # Reject ephemeral storage before reading any Secret.
         creds=credentials()
-        binding,flat=prepare(root,creds,require_binding=args.run or args.audit_trade,recovery_only=args.recover_only and args.run)
-        if args.audit_trade:
+        binding,flat=prepare(root,creds,require_binding=args.run or args.audit_trade or args.close_reviewed_test,recovery_only=args.recover_only and args.run)
+        if args.close_reviewed_test:
+            from okx_demo_manual_close import close_test,ManualCloseBlocked
+            try:
+                closed=asyncio.run(close_test(root/'ledger.sqlite',binding,creds))
+            except ManualCloseBlocked as error:
+                raise SetupBlocked('manual_test_close_'+error.stage+'_blocked_prior_ledger_retained') from None
+            except Exception:
+                raise SetupBlocked('manual_test_close_unverified_prior_ledger_retained') from None
+            result.update(phase=closed['phase'],closure=closed)
+            code=0
+        elif args.audit_trade:
             from okx_demo_manual_review import audit_trade
             try:
                 review=asyncio.run(audit_trade(root/'ledger.sqlite',binding,creds))

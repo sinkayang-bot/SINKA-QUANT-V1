@@ -22,6 +22,12 @@ def digest(body):
     return hashlib.sha256(encoded(body).encode()).hexdigest()
 
 
+def unresolved_emergency_exit(db):
+    # Tombstones are permanent; only a verified archived flat cycle resolves them.
+    return db.execute('SELECT 1 FROM demo_emergency_exit e WHERE NOT EXISTS '
+        '(SELECT 1 FROM demo_cycle_archive a WHERE a.client_id=e.entry_id) LIMIT 1').fetchone() is not None
+
+
 class DemoCycleLifecycle(DemoSettlementAuditor):
     def __init__(self,authority,*,enable_cycle_transition=False):
         super().__init__(authority)
@@ -58,6 +64,11 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
             raise ValueError('Enabled atomic cycle transaction required')
         state=self.verify_archive_chain()
         settlement=self._settle_in_transaction(snapshot,bills,now)
+        return self._archive_settled_in_transaction(snapshot,bills,now,settlement,state)
+
+    def _archive_settled_in_transaction(self,snapshot,bills,now,settlement,state):
+        if not self.db.in_transaction or not self.enabled or state!=self.verify_archive_chain():
+            raise ValueError('Enabled verified archive transaction required')
         client=settlement['client_id']
         intents=self.db.execute('SELECT id FROM demo_intent').fetchall()
         if intents!=[(client,)] or self.db.execute('SELECT 1 FROM demo_cycle_archive WHERE client_id=?',(client,)).fetchone():

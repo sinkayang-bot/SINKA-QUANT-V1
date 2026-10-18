@@ -22,11 +22,15 @@ def retained_test(path, scope):
     with closing(sqlite3.connect(path.resolve().as_uri()+'?mode=ro', uri=True)) as db:
         db.execute('PRAGMA query_only=ON')
         db.execute('BEGIN')
-        rows=db.execute('SELECT i.id,i.plan,e.exchange_order_id FROM demo_intent i '
-            'JOIN demo_execution e ON e.id=i.id WHERE i.dispatched=1').fetchall()
-        meta=db.execute('SELECT scope,baseline_at FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
-        cash=db.execute('SELECT cash FROM demo_cash_baseline WHERE singleton=1').fetchone()
-        baseline={r[0]:json.loads(r[1]) for r in db.execute('SELECT identity,body FROM demo_audit_fills WHERE baseline=1')}
+        return retained_in_transaction(db,scope)
+
+
+def retained_in_transaction(db,scope):
+    rows=db.execute('SELECT i.id,i.plan,e.exchange_order_id FROM demo_intent i '
+        'JOIN demo_execution e ON e.id=i.id WHERE i.dispatched=1').fetchall()
+    meta=db.execute('SELECT scope,baseline_at FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
+    cash=db.execute('SELECT cash FROM demo_cash_baseline WHERE singleton=1').fetchone()
+    baseline={r[0]:json.loads(r[1]) for r in db.execute('SELECT identity,body FROM demo_audit_fills WHERE baseline=1')}
     if len(rows)!=1 or not meta or meta[0]!=scope or not cash:
         raise ValueError('Original single test and baseline required')
     client, raw, order_id=rows[0]; plan=json.loads(raw)

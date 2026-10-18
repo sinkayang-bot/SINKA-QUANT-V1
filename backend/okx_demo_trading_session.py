@@ -13,7 +13,7 @@ import json
 import re
 
 from okx_demo_bill_reader import DemoBillReader
-from okx_demo_cycles import DemoCycleLifecycle
+from okx_demo_cycles import DemoCycleLifecycle,unresolved_emergency_exit
 from okx_demo_executor import receipt
 from okx_demo_protection import assess_recovery
 from okx_demo_snapshot import DemoSnapshotReader
@@ -81,7 +81,7 @@ class DemoTradingSession:
                 if not self.authority.acquire(): return outcome('lease_busy')
                 now=self._owner()
                 if self.authority._owner(now)[5]: return outcome('kill_switch_active')
-                if self.db.execute('SELECT 1 FROM demo_emergency_exit').fetchone():
+                if unresolved_emergency_exit(self.db):
                     return outcome('emergency_exit_review_required')
                 self.lifecycle.verify_archive_chain()
                 if self.db.execute('SELECT 1 FROM demo_intent').fetchone():
@@ -101,6 +101,9 @@ class DemoTradingSession:
                     balance_received_at_ms=proof['received_at_ms'],
                     instrument_received_at_ms=proof['received_at_ms'],demo=True)
                 frozen.pop('now_ms',None)
+                if execution_test:
+                    # The immutable archive sequence, never caller text or a random nonce.
+                    frozen['test_cycle']=self.lifecycle.verify_archive_chain()[0]
                 candidate=planner(**frozen,now_ms=self._owner())
                 if not self.authority.allows(candidate): return outcome('entry_gate_blocked')
                 client_id=self.journal.register(candidate['plan'])

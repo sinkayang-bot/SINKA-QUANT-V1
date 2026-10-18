@@ -19,6 +19,23 @@ def test_plan_never_reads_secrets_or_account(monkeypatch,capsys):
     assert result['phase']=='plan' and result['orders_enabled'] is False
 
 
+def test_manual_close_mode_never_starts_order_worker(monkeypatch,capsys):
+    import okx_demo_manual_close as close
+    monkeypatch.setattr(setup,'persistent_storage',lambda root:None)
+    monkeypatch.setattr(setup,'credentials',lambda:object())
+    monkeypatch.setattr(setup,'prepare',lambda *a,**k:({'account_scope':'scope'},True))
+    monkeypatch.setattr(setup,'execute',lambda *a,**k:pytest.fail('Trading worker called during manual close'))
+    async def done(*args): return dict(phase='manual_test_closed_and_archived',new_entry_allowed=False,orders_sent=0)
+    monkeypatch.setattr(close,'close_test',done)
+    assert setup.main(['--close-reviewed-test'])==0
+    result=json.loads(capsys.readouterr().out)
+    assert result['orders_enabled'] is False and result['closure']['orders_sent']==0
+    async def fail(*args): raise close.ManualCloseBlocked('composite_exchange_reads')
+    monkeypatch.setattr(close,'close_test',fail)
+    assert setup.main(['--close-reviewed-test'])==2
+    assert 'composite_exchange_reads' in json.loads(capsys.readouterr().out)['reason']
+
+
 def test_fixed_secret_versions_are_pinned_and_values_are_not_printed(monkeypatch):
     calls=[]
     def command(args):
