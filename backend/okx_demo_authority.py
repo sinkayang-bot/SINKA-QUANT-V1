@@ -99,6 +99,21 @@ class DemoEntryAuthority:
             raise ValueError("Current execution lease required")
         return row
 
+    def release(self):
+        """Release only this session/epoch after work stops; preserve all history."""
+        self.snapshot=None
+        self.approved=None
+        if self.epoch is None: return False
+        if self.db.in_transaction: raise ValueError('Cannot release an open transaction')
+        now=self._now()
+        changed=self.db.execute('UPDATE demo_authority SET kill=1,expires=0,last_clock=? '
+            'WHERE singleton=1 AND scope=? AND worker=? AND session=? AND epoch=? AND last_clock<=?',
+            (now,self.scope,self.worker,self.session,self.epoch,now)).rowcount
+        if changed==1:
+            self.epoch=None
+            self.acquired_at=None
+        return changed==1
+
     def set_kill_switch(self, active):
         if type(active) is not bool:
             raise ValueError("Boolean kill switch required")

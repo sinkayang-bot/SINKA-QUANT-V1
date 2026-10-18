@@ -70,6 +70,33 @@ class DemoAuthorityTests(unittest.TestCase):
         self.assertFalse(second.allows(self.candidate))
         self.assertFalse(third.allows(self.candidate))
 
+    def test_release_allows_immediate_handoff_without_clearing_intent_or_risk(self):
+        self.ready(); self.reserve()
+        intent=self.journal.db.execute('SELECT * FROM demo_intent').fetchall()
+        risk=self.journal.db.execute('SELECT * FROM demo_risk_entry').fetchall()
+        daily=self.journal.db.execute('SELECT * FROM demo_daily').fetchall()
+        self.assertTrue(self.authority.release())
+        self.assertIsNone(self.authority.snapshot)
+        self.assertIsNone(self.authority.approved)
+        self.assertEqual(self.journal.db.execute('SELECT kill,expires FROM demo_authority').fetchone(),(1,0))
+        second=self.make_authority(self.open_journal(),worker='closer',session='close-session')
+        self.assertTrue(second.acquire())
+        self.assertEqual(self.journal.db.execute('SELECT * FROM demo_intent').fetchall(),intent)
+        self.assertEqual(self.journal.db.execute('SELECT * FROM demo_risk_entry').fetchall(),risk)
+        self.assertEqual(self.journal.db.execute('SELECT * FROM demo_daily').fetchall(),daily)
+
+    def test_release_cannot_touch_a_newer_owner_or_an_unacquired_lease(self):
+        self.ready()
+        second=self.make_authority(self.open_journal(),worker='closer',session='close-session')
+        before=self.journal.db.execute('SELECT * FROM demo_authority').fetchone()
+        self.assertFalse(second.release())
+        self.assertEqual(self.journal.db.execute('SELECT * FROM demo_authority').fetchone(),before)
+        self.now+=30001
+        self.assertTrue(second.acquire()); second.set_kill_switch(False)
+        before=self.journal.db.execute('SELECT * FROM demo_authority').fetchone()
+        self.assertFalse(self.authority.release())
+        self.assertEqual(self.journal.db.execute('SELECT * FROM demo_authority').fetchone(),before)
+
     def test_expired_owner_fenced_after_takeover_and_new_owner_starts_killed(self):
         self.ready()
         self.now += 30001

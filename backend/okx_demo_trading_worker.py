@@ -80,7 +80,7 @@ def execute(environ=None):
     if env.get('RUN_DEMO_TRADING')!='1': return outcome('disabled'),0
     if env.get('DEMO_TRADING_AUTHORIZED')!='1': return outcome('demo_authorization_required'),2
     if any(not env.get(name) for name in REQUIRED): return outcome('configuration_missing'),2
-    journal=None
+    journal=None; owner=None
     try:
         execution_test=env.get('DEMO_EXECUTION_TEST')=='1'
         recover_only=env.get('DEMO_RECOVER_ONLY')=='1'
@@ -124,6 +124,9 @@ def execute(environ=None):
     except Exception:
         return outcome('configuration_or_runtime_unavailable'),2
     finally:
+        if owner is not None:
+            try: owner.release()
+            except Exception: pass  # An old owner cannot change a newer lease.
         if journal is not None: journal.close()
 
 

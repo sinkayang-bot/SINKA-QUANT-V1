@@ -154,7 +154,9 @@ async def close_test(path,binding,creds):
         raise ManualCloseBlocked(stage) from None
     finally:
         # Release only this owner's lease, keep the kill switch and all history.
-        if owner is not None and owner.epoch is not None:
-            journal.db.execute('UPDATE demo_authority SET kill=1,expires=0 WHERE singleton=1 AND session=? AND epoch=?',
-                (owner.session,owner.epoch))
-        journal.close()
+        try:
+            if owner is not None:
+                try: owner.release()
+                except Exception: pass  # Cleanup must not mask a committed close.
+        finally:
+            journal.close()

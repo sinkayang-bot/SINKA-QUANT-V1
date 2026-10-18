@@ -33,6 +33,11 @@
 查詢證實完整成交、帳戶空倉且無殘留掛單，才結合該觀察判定連線測試通過。
 不從已取消 OCO 的歷史查詢推定 live，不因重啟重新進場或重送減倉。
 
+限時 worker 結束時，會在關閉帳本前釋放自己的租約並保持停單。釋放必須同時
+符合 account scope、worker、session 與 epoch，且時鐘不可回退；舊程序或未取得
+租約的程序不能解除新程序的鎖。此操作不刪除委託、成交、風控、封存或保護
+觀察紀錄。後續結案可以立即取得租約，不必等待上一程序的 30 秒到期。
+
 若 `--close-reviewed-test` 辨識為程式既有減倉，其正式封存來源會記為
 `tracked_emergency_exit`，輸出 `tracked_test_exit_closed_and_archived`，並保存
 完整減倉 reservation 證據。停單、風控及原生保護尚未通過的標記都保留。
