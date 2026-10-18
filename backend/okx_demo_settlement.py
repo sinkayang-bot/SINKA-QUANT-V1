@@ -21,6 +21,10 @@ def bill(raw):
         raise ValueError('Invalid bill identity')
     for field in ('pnl','fee','balChg'):
         result[field]=money(raw.get(field))
+    # Preserve explicit position cash changes for read-only isolated reviews.
+    # Missing is not silently invented as zero. Existing settlement stays strict.
+    if raw.get('posBalChg') not in (None,''):
+        result['posBalChg']=money(raw['posBalChg'])
     for field in ('sz','px'):
         result[field]=money(raw.get(field),positive_only=True)
     return result

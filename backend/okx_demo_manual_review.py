@@ -85,7 +85,7 @@ def assess(saved, bundle, entry, closing):
         mismatches[label]=mismatches.get(label,0)+1
     with localcontext() as context:
         context.prec=512
-        movement=Decimal(0)
+        movement=Decimal(0); position_movement=Decimal(0); transfer_rows=0
         for row in rows.values():
             identity=row['instId']+':'+row['tradeId']; fill=active.get(identity)
             direction='buy' if row['subType'] in {'1','3','6'} else 'sell'
@@ -99,15 +99,22 @@ def assess(saved, bundle, entry, closing):
                 if int(row['ts'])<int(fill['fillTime']): mismatch('bill_timestamp_before_fill')
                 for field,other in [('sz','fillSz'),('px','fillPx'),('fee','fee'),('pnl','fillPnl')]:
                     if Decimal(row[field])!=Decimal(fill[other]): mismatch(field)
-            if Decimal(row['balChg'])!=Decimal(row['pnl'])+Decimal(row['fee']): mismatch('balance_change_equation')
+            position_delta=Decimal(row.get('posBalChg','0'))
+            if Decimal(row['balChg'])+position_delta!=Decimal(row['pnl'])+Decimal(row['fee']):
+                mismatch('balance_change_equation')
+            if position_delta!=0: transfer_rows+=1
+            position_movement+=position_delta
             seen.add(identity); movement+=Decimal(row['balChg'])
         if set(active)-seen: mismatches['fills_without_bill']=len(set(active)-seen)
         if not active: mismatch('no_trade_fills')
         checks['all_bills_match_fills']=not mismatches
+        # For a complete flat-to-flat round trip, no cash may remain in the position.
+        checks['position_cash_returns_to_zero']=position_movement==0
         report['bill_fill_mismatches']=mismatches
         cash_delta=Decimal(money(snap['cash_balance_usdt']))-Decimal(saved['cash'])
         checks['cash_matches_bills']=cash_delta==movement
         report.update(fill_count=len(active),bill_count=len(rows),
+            position_cash_change_usdt=format(position_movement,'f'),position_transfer_bill_count=transfer_rows,
             fees_usdt=format(sum((Decimal(f['fee']) for f in active.values()),Decimal(0)),'f'),
             realized_pnl_usdt=format(sum((Decimal(f['fillPnl']) for f in active.values()),Decimal(0)),'f'),
             bill_movement_usdt=format(movement,'f'),cash_change_usdt=format(cash_delta,'f'))

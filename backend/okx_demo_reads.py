@@ -6,7 +6,7 @@ ALGO_TYPES = ("conditional", "oco", "trigger", "move_order_stop", "chase")
 DETAIL_FIELDS = frozenset({"ccy", "eq", "availEq", "availBal", "cashBal", "uTime"})
 SCHEMAS = {
     "/api/v5/trade/order-algo": (1, frozenset({"algoId", "algoClOrdId", "instId", "instType", "state", "ordType", "sz", "side", "posSide", "tdMode", "reduceOnly", "closeFraction", "slTriggerPx", "slTriggerPxType", "slOrdPx", "tpTriggerPx", "tpTriggerPxType", "tpOrdPx", "ordIdList", "subAlgoIdList"})),
-    "/api/v5/account/bills": (100, frozenset({"billId", "ts", "type", "subType", "ordId", "tradeId", "instId", "instType", "ccy", "pnl", "fee", "balChg", "sz", "px"})),
+    "/api/v5/account/bills": (100, frozenset({"billId", "ts", "type", "subType", "ordId", "tradeId", "instId", "instType", "ccy", "pnl", "fee", "balChg", "posBalChg", "sz", "px"})),
     "/api/v5/account/config": (1, frozenset({"uid", "posMode", "acctLv", "perm"})),
     "/api/v5/account/balance": (1, frozenset({"details"})),
     "/api/v5/account/leverage-info": (2, frozenset({"instId", "mgnMode", "posSide", "lever"})),

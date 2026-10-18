@@ -92,6 +92,38 @@ def test_missing_ledger_is_not_created(tmp_path):
     assert not path.exists()
 
 
+def test_explicit_isolated_margin_changes_reconcile_only_when_returned_in_full():
+    saved,bundle,entry,close=fixture()
+    for pages in bundle['bills']['passes']:
+        opened,exited=reversed(pages[0]['data'])
+        opened.update(balChg='-10.1',posBalChg='10')
+        exited.update(balChg='10.9',posBalChg='-10')
+    report=assess(saved,bundle,entry,close)
+    assert report['evidence_matches']
+    assert report['position_transfer_bill_count']==2
+    assert report['position_cash_change_usdt']=='0'
+    assert report['automatic_exit_verified'] is False and report['new_entry_allowed'] is False
+    for pages in bundle['bills']['passes']:
+        pages[0]['data'][0].update(balChg='9.9',posBalChg='-9')
+    bundle['snapshot']['cash_balance_usdt']='99.8'
+    report=assess(saved,bundle,entry,close)
+    assert report['checks']['cash_matches_bills']
+    assert report['checks']['all_bills_match_fills']
+    assert not report['checks']['position_cash_returns_to_zero']
+    assert not report['evidence_matches']
+
+
+def test_unexplained_margin_change_cannot_be_inferred_from_total_cash_match():
+    saved,bundle,entry,close=fixture()
+    for pages in bundle['bills']['passes']:
+        opened,exited=reversed(pages[0]['data'])
+        opened['balChg']='-10.1'; exited['balChg']='10.9'
+    report=assess(saved,bundle,entry,close)
+    assert report['checks']['cash_matches_bills']
+    assert report['bill_fill_mismatches']['balance_change_equation']==2
+    assert not report['evidence_matches']
+
+
 def test_audit_cli_cannot_start_worker_or_enable_orders(monkeypatch,capsys):
     import okx_demo_cloudshell as setup
     import okx_demo_manual_review as review
