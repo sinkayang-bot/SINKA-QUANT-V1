@@ -273,7 +273,7 @@ def main(argv=None):
     parser.add_argument('--recover-only',action='store_true',help='Recover the existing tracked intent without any new entry')
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
     parser.add_argument('--scan-markets',type=int,choices=(1,20),default=1)
-    parser.add_argument('--resume-idle',action='store_true',help='Reconcile a never-traded idle baseline up to 12 hours old')
+    parser.add_argument('--resume-idle',action='store_true',help='Reconcile an untouched or verified archived idle baseline up to 12 hours old; preserve daily risk')
     parser.add_argument('--seconds',type=int,default=300,choices=range(1,901),metavar='1..900')
     args=parser.parse_args(argv)
     result=dict(mode='demo_cloudshell_acceptance',phase='plan',secret_values_printed=False,

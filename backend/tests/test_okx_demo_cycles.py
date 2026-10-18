@@ -170,12 +170,68 @@ class CycleTests(unittest.TestCase):
         with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills)
         self.assertEqual(journal.db.execute('SELECT valid FROM demo_audit_receipt').fetchone()[0],1)
 
-    def test_idle_gap_larger_than_bound_never_automatically_rebaselines(self):
+    def test_idle_gap_requires_explicit_resume_and_preserves_original_baseline(self):
         self.roll(); self.t.now+=60001; self.t.authority.acquire()
         raw,bills=self.idle()
         with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills)
-        with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills,resume_idle=True)
+        proof=self.cycles.audit_idle(raw,bills,resume_idle=True)
+        self.assertTrue(proof['fill_audit_ready'])
         self.assertEqual(self.t.journal.db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0],self.boundary)
+
+    def test_archived_idle_resume_keeps_loss_halt_history_and_kill_switch(self):
+        self.prepared('-100'); db=self.t.journal.db
+        db.execute('UPDATE demo_daily SET loss_streak=2')
+        self.rolled=self.cycles.advance_cycle(self.raw,self.bills)
+        self.boundary=self.raw['received_at_ms']
+        self.t.authority.set_kill_switch(True)
+        tables=('demo_cycle_archive','demo_daily','demo_risk_entry','demo_risk_close','demo_cash_baseline')
+        before={t:db.execute('SELECT * FROM '+t).fetchall() for t in tables}
+        self.t.now+=7200000; self.t.authority.acquire()
+        raw,bills=self.idle()
+        self.t.authority.accept_snapshot(self.cycles.audit_idle(raw,bills,resume_idle=True))
+        self.assertEqual(before,{t:db.execute('SELECT * FROM '+t).fetchall() for t in tables})
+        self.assertEqual(db.execute('SELECT halt FROM demo_daily').fetchone()[0],1)
+        self.assertEqual(db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        receipt=json.loads(db.execute('SELECT body FROM demo_idle_resume').fetchone()[0])
+        self.assertEqual(receipt['cycle_sequence'],1)
+        self.assertEqual(receipt['archive_hash'],self.rolled['archive_hash'])
+        self.assertFalse(self.t.authority.allows(plan_strategy_signal(**self.source())))
+
+    def test_archived_idle_gap_rejects_stale_changed_or_unsettled_evidence(self):
+        for change in ('too_old','cash','fill','bill','archive','baseline','emergency','write_failure'):
+            with self.subTest(change=change):
+                self.setUp(); self.roll(); db=self.t.journal.db
+                self.t.now+=43200001 if change=='too_old' else 7200000
+                self.t.authority.acquire(); raw,bills=self.idle()
+                if change=='cash': raw['cash_balance_usdt']='1'
+                if change=='fill': raw['recent_fills'].append(self.t.fill(billId='999',tradeId='999',ordId='999'))
+                if change=='bill':
+                    for pages in bills['passes']: pages[0]['data']=[{}]
+                if change=='archive': db.execute("UPDATE demo_cycle_archive SET hash='bad'")
+                if change=='baseline': db.execute('UPDATE demo_fill_audit_meta SET baseline_at=baseline_at-1')
+                if change=='emergency':
+                    db.execute('CREATE TABLE IF NOT EXISTS demo_emergency_exit (entry_id TEXT)')
+                    db.execute("INSERT INTO demo_emergency_exit(entry_id) VALUES('unresolved')")
+                if change=='write_failure':
+                    db.execute("CREATE TRIGGER fail_resume BEFORE INSERT ON demo_idle_resume BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
+                before=db.execute('SELECT baseline_at,last_checked,revision FROM demo_fill_audit_meta').fetchone()
+                with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills,resume_idle=True)
+                self.assertEqual(db.execute('SELECT baseline_at,last_checked,revision FROM demo_fill_audit_meta').fetchone(),before)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+                self.assertIsNone(db.execute('SELECT 1 FROM demo_idle_resume').fetchone())
+
+    def test_resume_receipt_identity_does_not_repeat_after_cycle_revision_reset(self):
+        self.roll(); db=self.t.journal.db
+        # Earlier-cycle receipts survive archival while the current cycle's
+        # fill-audit revision restarts at one.
+        previous='{"cycle_sequence":0,"revision":2}'
+        db.execute('INSERT INTO demo_idle_resume VALUES(2,?)',(previous,))
+        self.t.now+=60001; self.t.authority.acquire(); raw,bills=self.idle()
+        self.cycles.audit_idle(raw,bills,resume_idle=True)
+        rows=db.execute('SELECT revision,body FROM demo_idle_resume ORDER BY revision').fetchall()
+        self.assertEqual(rows[0],(2,previous))
+        self.assertEqual(rows[1][0],3)
+        self.assertEqual(json.loads(rows[1][1])['audit_revision'],2)
 
     def test_double_archive_attempt_cannot_erase_history_or_duplicate_risk(self):
         self.roll()

@@ -161,7 +161,7 @@ printed. A broken progress output stream does not interrupt recovery.
 
 Normal idle monitoring still requires audit continuity within 60 seconds.
 Explicit `--resume-idle` permits GET-only reconciliation of a never-traded first
-cycle whose ORIGINAL baseline is at most 12 hours old. It requires no entry
+cycle whose ORIGINAL baseline is at most 12 hours old. That case requires no entry
 reservations, execution history, closes, archives or emergency exits; current
 account snapshots must be stable, flat and free of orders/algos, recent fills
 must exactly match known baseline fills with the original anchor retained,
@@ -171,8 +171,16 @@ cash must be unchanged. Any failed evidence blocks entries.
 A successful recovery atomically appends a hashed-evidence receipt to
 `demo_idle_resume` and refreshes the audit checkpoint in the current lease;
 it does not change the baseline, risk counters, account binding or kill switch.
-The trading supervisor separately requires explicit entry arming. This does not
-recover ledgers with prior trading or baselines older than 12 hours.
+The trading supervisor separately requires explicit entry arming.
+
+The same option also supports an idle cycle created by a verified archive, up
+to 12 hours after its ORIGINAL archive boundary. The full archive hash chain,
+cycle checkpoint, and archived cash baseline must match. No active execution,
+closed trade, settlement, bill ledger, or unresolved emergency exit may remain. The
+same unchanged fills/cash and two empty bill scans are required. The resume
+receipt includes the cycle sequence and archive hash. Prior archives, risk
+entries/closes, daily loss halt, cooldown and kill switch remain unchanged.
+It cannot recover unsettled trading activity or baselines older than 12 hours.
 Never delete the ledger, edit audit timestamps or initialize a second baseline.
 
 After a no-order first trial, resume using the same pinned binding and ledger:
