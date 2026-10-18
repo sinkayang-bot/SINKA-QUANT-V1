@@ -10,7 +10,7 @@ COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app/backend
 COPY backend/okx_demo_*.py ./
 COPY backend/okx_strategy_bridge.py backend/okx_instruments.py backend/okx_risk.py backend/okx_orders.py backend/okx_reconcile.py ./
-COPY strategy/demo-signal.mjs strategy/public-market.mjs strategy/snr-engine.mjs /app/strategy/
+COPY strategy/demo-signal.mjs strategy/demo-market-scan.mjs strategy/public-market.mjs strategy/snr-engine.mjs /app/strategy/
 ENV RUN_DEMO_TRADING=0 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER worker
 CMD ["python","okx_demo_trading_worker.py"]

@@ -1,5 +1,5 @@
 // Research paper execution only. Pure functions: no network, credentials or broker.
-export const SYMBOLS=Object.freeze(['BTC-USDT-SWAP','ETH-USDT-SWAP','SOL-USDT-SWAP','XRP-USDT-SWAP','DOGE-USDT-SWAP']);
+export const SYMBOLS=Object.freeze(["BTC-USDT-SWAP","ETH-USDT-SWAP","SOL-USDT-SWAP","XRP-USDT-SWAP","DOGE-USDT-SWAP","ADA-USDT-SWAP","AVAX-USDT-SWAP","LINK-USDT-SWAP","DOT-USDT-SWAP","LTC-USDT-SWAP","BCH-USDT-SWAP","TRX-USDT-SWAP","TON-USDT-SWAP","SUI-USDT-SWAP","NEAR-USDT-SWAP","APT-USDT-SWAP","ATOM-USDT-SWAP","UNI-USDT-SWAP","ETC-USDT-SWAP","FIL-USDT-SWAP"]);
 export const RULES=Object.freeze({version:'SNR-5M-1',barMs:300000,lookback:40,warmup:81,atrPeriod:14,emaPeriod:50,
   breakoutATR:.25,rewardRisk:2,risk:.005,maxNotional:3,fee:.0005,slip:.0002,
   minStopFraction:.002,maxStopFraction:.03,maxEntryDriftATR:.5,maxHoldingBars:12,

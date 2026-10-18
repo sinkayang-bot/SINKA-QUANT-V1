@@ -268,6 +268,7 @@ def main(argv=None):
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--run',action='store_true')
     parser.add_argument('--initialize-baseline',action='store_true')
+    parser.add_argument('--scan-markets',type=int,choices=(1,20),default=1)
     parser.add_argument('--resume-idle',action='store_true',help='Reconcile a never-traded idle baseline up to 12 hours old')
     parser.add_argument('--seconds',type=int,default=300,choices=range(1,901),metavar='1..900')
     args=parser.parse_args(argv)
@@ -292,7 +293,7 @@ def main(argv=None):
                 raise SetupBlocked('supported_node_runtime_required')
             env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='1',DEMO_PROGRESS='1',
                 DEMO_INITIALIZE_BASELINE='1' if args.initialize_baseline else '0',
-                DEMO_RESUME_IDLE='1' if args.resume_idle else '0',
+                DEMO_RESUME_IDLE='1' if args.resume_idle else '0',DEMO_SCAN_MARKETS=str(args.scan_markets),
                 DEMO_MAX_SECONDS=str(args.seconds),DEMO_LEDGER_PATH=str(root/'ledger.sqlite'),
                 DEMO_ACCOUNT_SCOPE=binding['account_scope'],OKX_EXPECTED_UID=binding['uid'],
                 DEMO_SYMBOL=SYMBOL,OKX_API_KEY=creds.key,OKX_API_SECRET=creds.secret,OKX_API_PASSPHRASE=creds.passphrase)

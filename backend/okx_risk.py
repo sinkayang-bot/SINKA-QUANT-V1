@@ -5,10 +5,7 @@ This module validates candidate orders only. It never sends requests to OKX.
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
-SYMBOLS = frozenset({
-    "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP",
-    "XRP-USDT-SWAP", "DOGE-USDT-SWAP",
-})
+SYMBOLS = frozenset(['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP', 'XRP-USDT-SWAP', 'DOGE-USDT-SWAP', 'ADA-USDT-SWAP', 'AVAX-USDT-SWAP', 'LINK-USDT-SWAP', 'DOT-USDT-SWAP', 'LTC-USDT-SWAP', 'BCH-USDT-SWAP', 'TRX-USDT-SWAP', 'TON-USDT-SWAP', 'SUI-USDT-SWAP', 'NEAR-USDT-SWAP', 'APT-USDT-SWAP', 'ATOM-USDT-SWAP', 'UNI-USDT-SWAP', 'ETC-USDT-SWAP', 'FIL-USDT-SWAP'])
 
 def positive(value, name):
     try:

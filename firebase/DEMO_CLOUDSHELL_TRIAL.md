@@ -120,3 +120,47 @@ After a no-order first trial, resume using the same pinned binding and ledger:
 
 This is a bounded **demo-order-enabled** trial, not a 24/7 deployment. It may
 place simulated orders when a new strategy signal and all gates pass.
+
+### Explicit 20-market mode
+
+Use `--scan-markets 20` with the existing `--run --resume-idle --seconds 900`
+trial. The default remains one market. The pinned account binding and shared
+ledger are retained; do not create 20 account baselines or run 20 workers.
+
+Candidate USDT linear swaps: BTC, ETH, SOL, XRP, DOGE, ADA, AVAX, LINK, DOT,
+LTC, BCH, TRX, TON, SUI, NEAR, APT, ATOM, UNI, ETC, FIL. These are candidates,
+not a claim that all 20 are currently listed, liquid, or price-stable. Public
+instrument/ticker GETs verify at each scan: live linear USDT settlement, listing
+age at least 90 days, valid sizing/tick limits, no scheduled metadata change,
+approximate 24h USDT turnover at least 10 million (`volCcy24h * last`), bid/ask
+spread at most 0.1%, and 24h high/low range at most 20%. Missing/invalid data
+excludes a candidate. Fewer than 10 eligible markets is possible; filters are
+never weakened to fill a quota. Thresholds are implementation choices, not
+exchange guarantees or profitability claims.
+
+Up to four public snapshot tasks run concurrently. The scanner has a bounded
+eight-second request budget and a ten-second subprocess deadline; the child
+process receives PATH only. Scan results report eligible/checked/no_signal/
+expired/prestart/fetch_failed/signals counts. New candidates are chosen in
+descending approximate turnover order, not expected return. Signals must still
+pass the original 20-second age and 15-second quote limits at entry.
+
+When flat, the supervisor checks the selected contract and its EXISTING isolated
+net leverage (1..3x) using a GET-only reader. Unsupported account settings skip
+that candidate for this run, reporting `market_preflight_blocked`; the worker
+does not change leverage. Readers switch together under the same account lease
+and reconciliation lock. Entry then repeats the full cash/fill/bill risk audit.
+Any active intent stops further market scans, so the entire account still has
+at most one strategy intent/position and one shared daily risk budget. A restart
+in 20-market mode reads the active instrument from its durable intent BEFORE
+recovery, not from the last public scanner output. The BTC field in the original
+account binding remains the bootstrap market; it is never rewritten.
+
+A 900-second test can end by reducing an owned position and require emergency
+settlement review. That outcome is not 24/7 readiness. Intercepted tests exercise
+altcoin entry, native protection, duplicate prevention and reduce-only shutdown;
+actual OKX demo fills remain separate operator acceptance evidence.
+
+```bash
+"$HOME/sinka-demo-venv/bin/python" "$SINKA_SETUP_DIR/backend/okx_demo_cloudshell.py" --run --resume-idle --scan-markets 20 --seconds 900
+```

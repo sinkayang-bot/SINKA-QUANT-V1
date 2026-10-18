@@ -10,10 +10,14 @@ from copy import deepcopy
 from okx_demo_reconciliation import DemoReconciliationRunner
 from okx_demo_trading_session import DemoTradingSession,outcome
 from okx_demo_transport import OKXDemoReadTransport
+from okx_demo_snapshot import DemoSnapshotReader
+from okx_demo_bill_reader import DemoBillReader
+from okx_demo_close_reader import DemoCloseReader
+from okx_risk import SYMBOLS
 
 
 class DemoTradingSupervisor:
-    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5):
+    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False):
         if (type(session) is not DemoTradingSession or type(reconciliation) is not DemoReconciliationRunner
                 or reconciliation.lifecycle is not session.lifecycle
                 or type(reconciliation.reader.transport) is not OKXDemoReadTransport
@@ -28,6 +32,7 @@ class DemoTradingSupervisor:
             raise ValueError('Bounded monitor interval required (2..10 seconds)')
         self.session,self.reconciliation,self.source=session,reconciliation,source
         self.enabled=enabled is True
+        self.scan_markets=scan_markets is True
         self.max_seconds,self.poll_seconds=max_seconds,poll_seconds
         self.stop_event=asyncio.Event()
         self.started_at=None
@@ -50,6 +55,43 @@ class DemoTradingSupervisor:
         except Exception:
             return outcome('shutdown_recovery_unresolved')
 
+    def _scan_status(self,result,symbol=None):
+        if self.scan_markets:
+            result=result|{'scan':dict(getattr(self.source,'last_scan',{}))}
+            if symbol in SYMBOLS: result['selected_symbol']=symbol
+        return result
+
+    async def _select_market(self,symbol):
+        if not self.scan_markets or symbol not in SYMBOLS:
+            raise ValueError('Explicit allowlisted multi-market mode required')
+        async with self.session.lock:
+            owner=self.session.authority
+            if not owner.acquire(): raise ValueError('Lease unavailable')
+            self.session._owner()
+            if self.session.db.execute('SELECT 1 FROM demo_intent').fetchone():
+                raise ValueError('Cannot switch active intent market')
+            owner.invalidate_snapshot()
+            args=dict(account_scope=self.session.reader.scope,expected_uid=self.session.reader.uid,
+                symbol=symbol,clock=self.session.reader.clock)
+            read=DemoSnapshotReader(self.reconciliation.reader.transport,**args)
+            try:
+                # Selected instrument/isolated leverage are validated by the
+                # account reader before rebinding. Entry repeats full bill audit.
+                await read.collect()
+            except Exception:
+                excluded=getattr(self.source,'excluded',None)
+                if isinstance(excluded,set): excluded.add(symbol)
+                return False
+            self.session._owner()
+            if self.stop_event.is_set(): return False
+            if self.session.db.execute('SELECT 1 FROM demo_intent').fetchone():
+                raise ValueError('Concurrent intent prevents market switch')
+            self.session.reader=DemoSnapshotReader(self.session.broker,**args)
+            self.reconciliation.reader=read
+            self.reconciliation.bill_reader=DemoBillReader(read)
+            self.reconciliation.close_reader=DemoCloseReader(read)
+            return True
+
     async def tick(self):
         if not self.enabled or not self.session.armed(): return outcome('disabled')
         if self.started_at is None: return outcome('supervisor_not_started')
@@ -69,10 +111,15 @@ class DemoTradingSupervisor:
         if self.stop_event.is_set(): return outcome('stop_requested')
         source=await self.source(self.session.reader.symbol,self.started_at)
         if self.stop_event.is_set(): return outcome('stop_requested')
-        if source is None: return outcome('waiting_for_signal')
+        if source is None: return self._scan_status(outcome('waiting_for_signal'))
+        selected=source.get('quote',{}).get('symbol')
+        if self.scan_markets and selected!=self.session.reader.symbol:
+            if not await self._select_market(selected):
+                return self._scan_status(outcome('market_preflight_blocked'),selected)
+        if self.stop_event.is_set(): return outcome('stop_requested')
         source=deepcopy(source)
         source['started_at_ms']=self.started_at
-        return await self.session.enter(source)
+        return self._scan_status(await self.session.enter(source),selected)
 
     async def run(self,*,initialize_baseline=False,arm_entries=False,resume_idle=False,on_status=None):
         if not self.enabled or not self.session.armed(): return outcome('disabled')
@@ -99,7 +146,7 @@ class DemoTradingSupervisor:
                 result=await self.tick()
                 if on_status is not None: on_status(deepcopy(result))
                 if result['phase'] not in {'waiting_for_signal','entry_gate_blocked','cycle_archived',
-                    'native_protection_verified_monitor_required','kill_switch_active'}:
+                    'native_protection_verified_monitor_required','kill_switch_active','market_preflight_blocked'}:
                     reason=result['phase']
                     break
                 remaining=min(self.poll_seconds,max(0,deadline-loop.time()))

@@ -17,6 +17,8 @@ from okx_demo_executor import DemoExecutionJournal
 from okx_demo_reconciliation import DemoReconciliationRunner
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_strategy_source import DemoStrategySource
+from okx_demo_market_scanner import DemoMarketScanner
+from okx_risk import SYMBOLS
 from okx_demo_trading_session import DemoTradingSession,outcome
 from okx_demo_trading_supervisor import DemoTradingSupervisor
 from okx_demo_trading_transport import OKXDemoTradingTransport
@@ -31,7 +33,7 @@ class DemoProgress:
         'native_protection_verified_monitor_required','kill_switch_active',
         'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
         'exit_unknown_no_retry','cancel_unconfirmed_no_retry',
-        'unsubmitted_intent_recovery_required','disabled','supervisor_not_started',
+        'unsubmitted_intent_recovery_required','disabled','supervisor_not_started','market_preflight_blocked',
         'flat_requires_emergency_settlement_review','exit_observed_no_resubmit'})
 
     def __init__(self,enabled=False):
@@ -45,9 +47,16 @@ class DemoProgress:
         self.counts[phase]=self.counts.get(phase,0)+1
         if self.enabled and (phase!=self.previous or sum(self.counts.values())%6==0):
             try:
-                print(json.dumps({'mode':'demo_progress','phase':phase,
-                    'ticks':sum(self.counts.values()),'live_trading_enabled':False},
-                    sort_keys=True,separators=(',',':')),flush=True)
+                payload={'mode':'demo_progress','phase':phase,
+                    'ticks':sum(self.counts.values()),'live_trading_enabled':False}
+                scan=result.get('scan')
+                if isinstance(scan,dict):
+                    payload['scan']={k:v for k,v in scan.items() if k in {
+                        'universe','eligible','checked','no_signal','expired','prestart',
+                        'fetch_failed','signals','excluded'} and type(v) is int and 0<=v<=20}
+                if result.get('selected_symbol') in SYMBOLS:
+                    payload['selected_symbol']=result['selected_symbol']
+                print(json.dumps(payload,sort_keys=True,separators=(',',':')),flush=True)
             except OSError:
                 pass
         self.previous=phase
@@ -84,15 +93,23 @@ def execute(environ=None):
         readonly=OKXDemoReadTransport(credentials,enable_demo_requests=True,clock=clock)
         reader_args=dict(account_scope=env['DEMO_ACCOUNT_SCOPE'],expected_uid=env['OKX_EXPECTED_UID'],
             symbol=env.get('DEMO_SYMBOL','BTC-USDT-SWAP'),clock=clock)
+        journal=DemoExecutionJournal(path)
+        multi=env.get('DEMO_SCAN_MARKETS')=='20'
+        active=journal.db.execute('SELECT plan FROM demo_intent').fetchall()
+        if len(active)>1: raise ValueError('Ambiguous active ledger')
+        if active:
+            active_symbol=json.loads(active[0][0])['body']['instId']
+            if active_symbol not in SYMBOLS or (not multi and active_symbol!=reader_args['symbol']):
+                raise ValueError('Active instrument requires matching scan mode')
+            reader_args['symbol']=active_symbol
         reader=DemoSnapshotReader(trading,**reader_args)
         read_reader=DemoSnapshotReader(readonly,**reader_args)
-        journal=DemoExecutionJournal(path)
         owner=DemoEntryAuthority(journal,account_scope=reader.scope,worker_id='demo-strategy',clock=clock)
         lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
         session=DemoTradingSession(lifecycle,reader,enabled=True)
         reconciliation=DemoReconciliationRunner(lifecycle,read_reader,enabled=True)
-        supervisor=DemoTradingSupervisor(session,reconciliation,DemoStrategySource(),enabled=True,
-            max_seconds=duration,poll_seconds=poll)
+        supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner() if multi else DemoStrategySource(),enabled=True,
+            max_seconds=duration,poll_seconds=poll,scan_markets=multi)
         result=asyncio.run(run_supervisor(supervisor,env))
         clean=(result['phase']=='verified_but_not_armed' or
             (result['phase']=='stopped_no_active_intent' and result.get('stop_reason') in {'stop_requested','runtime_limit'}))

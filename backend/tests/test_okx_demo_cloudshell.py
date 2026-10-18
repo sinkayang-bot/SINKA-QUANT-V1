@@ -248,7 +248,8 @@ def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsy
         captured.update(env)
         return {'phase':'stopped_no_active_intent'},0
     monkeypatch.setattr(setup,'execute',execute)
-    assert setup.main(['--run','--resume-idle','--seconds','900'])==0
+    assert setup.main(['--run','--resume-idle','--scan-markets','20','--seconds','900'])==0
+    assert captured['DEMO_SCAN_MARKETS']=='20'
     assert captured['DEMO_RESUME_IDLE']=='1'
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
     assert captured['DEMO_PROGRESS']=='1'
