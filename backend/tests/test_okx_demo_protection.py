@@ -28,6 +28,20 @@ def evidence(p, *, side="buy", fill="1", state="filled"):
 
 
 class DemoProtectionTests(unittest.TestCase):
+    def test_invalid_evidence_reports_fixed_stage_and_field_names_only(self):
+        p=plan(); e=evidence(p)
+        e['entry']['rows'][0]['tdMode']='cross'
+        result=assess_recovery(p,e,now_ms=NOW)
+        self.assertEqual(result['diagnostics'],dict(stage='entry_validation',parameter_mismatches=['tdMode']))
+        self.assertFalse(result['protection_verified'])
+        e=evidence(p); e['pending_algos']['rows'][0]['sz']=''
+        result=assess_recovery(p,e,now_ms=NOW)
+        self.assertEqual(result['diagnostics'],dict(stage='protection_parameters_validation',missing_fields=['sz']))
+        self.assertFalse(result['protection_verified'])
+        e=evidence(p)
+        result=assess_recovery(p,e,now_ms=NOW+10000)
+        self.assertEqual(result['diagnostics'],dict(stage='snapshot_freshness',stale_groups=['entry','positions','pending_orders','pending_algos']))
+
     def check(self, p, e):
         result = assess_recovery(p, e, now_ms=NOW)
         self.assertFalse(result["submission_enabled"])

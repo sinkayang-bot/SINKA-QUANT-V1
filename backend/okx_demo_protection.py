@@ -70,9 +70,12 @@ def assess_recovery(plan, evidence, *, now_ms):
     old order update time. Caller must bind all reads to one demo account/session.
     This is offline assessment, not an authentication boundary or executor.
     """
+    stage='plan_validation'
     try:
         body, bracket = _plan_body(plan)
+        stage='snapshot_freshness'
         _fresh_groups(evidence, now_ms)
+        stage='entry_validation'
         entries = evidence["entry"]["rows"]
         if len(entries) != 1:
             return report("entry_result_unknown", "halt_entries", "query_entry_no_resubmit")
@@ -85,6 +88,7 @@ def assess_recovery(plan, evidence, *, now_ms):
                 or (entry.state == "live" and entry.filled != 0)
                 or (entry.state == "partially_filled" and not 0 < entry.filled < entry.requested)):
             raise ValueError("Entry identity or fill mismatch")
+        stage='pending_entry_validation'
         pending = evidence["pending_orders"]["rows"]
         if entry.state in ACTIVE:
             if len(pending) != 1 or parse_order(pending[0]) != entry:
@@ -93,6 +97,7 @@ def assess_recovery(plan, evidence, *, now_ms):
                 raise ValueError("Pending parameters changed")
         elif pending:
             raise ValueError("Unresolved pending order")
+        stage='position_validation'
         positions = []
         for row in evidence["positions"]["rows"]:
             size = number(row.get("pos"), allow_negative=True)
@@ -125,6 +130,7 @@ def assess_recovery(plan, evidence, *, now_ms):
         if algo.get("state") != "live":
             return report("protection_not_live", "halt_entries", *remainder,
                           "reconcile_triggered_exit_no_duplicate_close")
+        stage='protection_parameters_validation'
         matches = (
             algo.get("ordType") == "oco" and algo.get("instType") == "SWAP"
             and algo.get("side") == ("sell" if direction == 1 else "buy")
@@ -144,4 +150,13 @@ def assess_recovery(plan, evidence, *, now_ms):
                           protected=True)
         return report("open_position_protected", "monitor_position_and_protection", protected=True)
     except (ValueError, TypeError, KeyError, ArithmeticError, IndexError):
-        return report("invalid_or_stale_evidence", "halt_entries", "refresh_and_reconcile_no_resubmit")
+        diagnostics={'stage':stage}
+        if stage=='snapshot_freshness' and isinstance(evidence,dict) and type(now_ms) is int:
+            diagnostics['stale_groups']=[name for name in GROUPS if isinstance(evidence.get(name),dict)
+                and type(evidence[name].get('received_at_ms')) is int
+                and not 0<=now_ms-evidence[name]['received_at_ms']<=5000]
+        if stage=='entry_validation':
+            diagnostics['parameter_mismatches']=[k for k in ('side','posSide','tdMode','ordType') if raw.get(k)!=body[k]]
+        if stage=='protection_parameters_validation':
+            diagnostics['missing_fields']=[k for k in ('sz','tpTriggerPx','slTriggerPx','tpOrdPx','slOrdPx','tpTriggerPxType','slTriggerPxType') if algo.get(k) in (None,'')]
+        return report("invalid_or_stale_evidence", "halt_entries", "refresh_and_reconcile_no_resubmit")|{'diagnostics':diagnostics}

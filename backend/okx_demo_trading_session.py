@@ -44,6 +44,7 @@ class DemoTradingSession:
         self.execution_test_diagnostics={}
         self.recovery_protection_verified=False
         self.recovery_stage='not_started'
+        self.recovery_diagnostics={}
         if not hasattr(self.authority,'reconciliation_lock'):
             self.authority.reconciliation_lock=asyncio.Lock()
         self.lock=self.authority.reconciliation_lock
@@ -151,7 +152,7 @@ class DemoTradingSession:
                 raise
             except Exception:
                 self.halt()
-                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage}
+                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,'protection_diagnostics':dict(self.recovery_diagnostics)}
 
     def _recovery_reader(self):
         return DemoSnapshotReader(self.broker,account_scope=self.reader.scope,expected_uid=self.reader.uid,
@@ -208,6 +209,7 @@ class DemoTradingSession:
         plan,snapshot,entry,evidence,stamp=await self._evidence(client_id)
         self.recovery_stage='protection_assessment'
         assessment=assess_recovery(plan,evidence,now_ms=self._owner())
+        self.recovery_diagnostics=dict(assessment.get('diagnostics',{}))
         if assessment['protection_verified']: self.recovery_protection_verified=True
         if assessment['reason']=='invalid_or_stale_evidence': raise ValueError('Invalid recovery evidence')
         if entry.state in ACTIVE:
