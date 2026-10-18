@@ -25,6 +25,14 @@
 15 分鐘風控冷卻期、三連虧停單及每日次數限制不變；冷卻阻擋明確回報
 `gate_reason: risk_cooldown` 與 `retry_after_seconds`，結案也回報剩餘秒數。
 
+訂單的 `observed_at_ms` 使用兩次訂單查詢完成後的實際時間，而非整體讀取的
+開始時間；必須位於帳戶快照開始之後、校驗時間之前。真實時鐘每毫秒前進時
+也應通過，不能靠凍結時鐘測試掩蓋錯誤。五秒快照／證據時效不放寬。
+重啟的 `--recover-only` 可讀取同一筆委託先前保存的有效 live OCO 觀察，
+用 `protection_source: persisted_live_observation` 區分來源；只有原始減倉
+查詢證實完整成交、帳戶空倉且無殘留掛單，才結合該觀察判定連線測試通過。
+不從已取消 OCO 的歷史查詢推定 live，不因重啟重新進場或重送減倉。
+
 若 `--close-reviewed-test` 辨識為程式既有減倉，其正式封存來源會記為
 `tracked_emergency_exit`，輸出 `tracked_test_exit_closed_and_archived`，並保存
 完整減倉 reservation 證據。停單、風控及原生保護尚未通過的標記都保留。

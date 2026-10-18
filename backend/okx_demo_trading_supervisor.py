@@ -15,6 +15,7 @@ from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_close_reader import DemoCloseReader
 from okx_demo_cycles import unresolved_emergency_exit
+from okx_demo_manual_review import retained_in_transaction
 from okx_risk import SYMBOLS
 
 
@@ -143,13 +144,20 @@ class DemoTradingSupervisor:
                 row=self.session.db.execute('SELECT id,dispatched FROM demo_intent').fetchone()
                 if row is None: return outcome('no_active_intent_no_submission')|{'recovery_only':True}
                 if row[1]!=1: return outcome('unsubmitted_intent_preserved')|{'recovery_only':True}
+                persisted_protection=False
+                try:
+                    retained=retained_in_transaction(self.session.db,owner.scope)
+                    persisted_protection=(retained['client']==row[0]
+                        and type(retained.get('native_protection_observed_at_ms')) is int)
+                except (ValueError,KeyError): pass
                 # Existing tracked intent only. Never call the public source,
                 # entry arming, baseline initialization or session.enter.
                 result=await self._cleanup()
-                protected=self.session.recovery_protection_verified
+                protected=self.session.recovery_protection_verified or persisted_protection
                 flat=result['phase']=='flat_requires_emergency_settlement_review'
                 return result|dict(recovery_only=True,protection_verified=protected,flat_verified=flat,
-                    test_roundtrip_verified=protected and flat,strategy_performance_sample=False)
+                    test_roundtrip_verified=protected and flat,strategy_performance_sample=False,
+                    protection_source='persisted_live_observation' if persisted_protection else 'current_recovery_observation')
             active=self.session.db.execute('SELECT plan FROM demo_intent').fetchone()
             if self.execution_test and active is not None:
                 try: owned_test=json.loads(active[0]).get('purpose')=='execution_test'

@@ -189,6 +189,7 @@ class DemoTradingSession:
             self.recovery_stage='entry_lookup'
             first=await self.broker.lookup_entry(body['instId'],client_id)
             second=await self.broker.lookup_entry(body['instId'],client_id)
+            observed_at=self._owner()
             self.recovery_stage='snapshot_after'
             after=await reader.collect()
         self.recovery_stage='evidence_consistency'
@@ -206,7 +207,7 @@ class DemoTradingSession:
             self._owner()
             self.journal._observe_in_transaction(client_id,raw)
             self.db.execute('UPDATE demo_execution SET observed_at_ms=?,exchange_order_id=COALESCE(exchange_order_id,?) WHERE id=?',
-                (start,parsed.order_id,client_id))
+                (observed_at,parsed.order_id,client_id))
             self.db.execute('COMMIT')
         except Exception:
             self.db.execute('ROLLBACK'); raise
@@ -318,20 +319,26 @@ class DemoTradingSession:
         body=json.loads(encoded); start=self._owner()
         reader=self._recovery_reader()
         async with asyncio.timeout(5):
+            self.recovery_stage='exit_snapshot_before'
             before=await reader.collect()
+            self.recovery_stage='exit_lookup'
             first=await self.broker.lookup_reduction(body['instId'],client_id)
             second=await self.broker.lookup_reduction(body['instId'],client_id)
+            self.recovery_stage='exit_snapshot_after'
             after=await reader.collect()
+        self.recovery_stage='exit_consistency'
         values=self._recovery_values
         if (self._owner()-start>5000 or values(before)!=values(after) or first!=second
                 or first.get('code')!='0' or len(first.get('data',[]))!=1):
             raise ValueError('Exit query unavailable or inconsistent')
         raw=first['data'][0]; order=parse_order(raw)
+        self.recovery_stage='exit_identity'
         if (order.client_order_id!=client_id or order.instrument!=body['instId']
                 or order.requested!=Decimal(body['sz']) or raw.get('reduceOnly') not in (True,'true')
                 or any(raw.get(k)!=body[k] for k in ('tdMode','posSide','side','ordType'))
                 or (expected_id is not None and expected_id!=order.order_id)):
             raise ValueError('Exit query identity mismatch')
+        self.recovery_stage='exit_flat_confirmation'
         flat=not any(number(row.get('pos'),allow_negative=True) for row in after['positions'])
         if (order.state=='filled' and order.filled==order.requested and flat
                 and not after['pending_orders'] and not after['pending_algos']):

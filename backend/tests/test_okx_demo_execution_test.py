@@ -47,6 +47,29 @@ class ExecutionModeTests(SupervisorTests):
         retained=retained_in_transaction(self.journal.db,self.owner.scope)
         self.assertEqual(retained['native_protection_observed_at_ms'],self.f.now)
 
+    async def test_advancing_real_style_clock_keeps_order_observation_after_snapshot_start(self):
+        def ticking_clock():
+            self.f.now+=1
+            return self.f.now
+        for target in (self.owner,self.reader,self.transport,self.read_reader,self.read_reader.transport):
+            target.clock=ticking_clock
+        self.enable()
+        result=await self.supervisor.run(arm_entries=True)
+        self.assertTrue(result['test_roundtrip_verified'])
+        self.assertEqual(result['test_attempts'][0]['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(len(self.f.posts),2)
+
+    async def test_restart_uses_saved_live_observation_and_queries_exit_without_new_orders(self):
+        self.enable(); await self.supervisor.run(arm_entries=True)
+        restarted=DemoTradingSession(self.cycles,self.reader,enabled=True)
+        async def forbidden(*args): raise AssertionError('Recovery queried public source')
+        recovery=DemoTradingSupervisor(restarted,self.runner,forbidden,enabled=True,recover_only=True,max_seconds=90)
+        result=await recovery.run()
+        self.assertTrue(result['test_roundtrip_verified'])
+        self.assertTrue(result['flat_verified'])
+        self.assertEqual(result['protection_source'],'persisted_live_observation')
+        self.assertEqual(len(self.f.posts),2)
+
     async def test_transient_pending_metadata_recovers_same_order_without_second_entry(self):
         self.enable(); original=self.session._evidence; calls=0
         async def transient(client):
