@@ -271,6 +271,7 @@ def main(argv=None):
     modes.add_argument('--close-reviewed-test',action='store_true',help='GET-only exchange reads and atomic local archival of the reviewed manual test close')
     parser.add_argument('--initialize-baseline',action='store_true')
     parser.add_argument('--recover-only',action='store_true',help='Recover the existing tracked intent without any new entry')
+    parser.add_argument('--daily-limits',action='store_true',help='Opt back into daily loss halt, entry cap and cooldown; disabled for demo trials by default')
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
     parser.add_argument('--scan-markets',type=int,choices=(1,20),default=1)
     parser.add_argument('--resume-idle',action='store_true',help='Reconcile an untouched or verified archived idle baseline up to 12 hours old; preserve daily risk')
@@ -316,6 +317,7 @@ def main(argv=None):
             env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='0' if args.recover_only else '1',DEMO_PROGRESS='1',
                 DEMO_INITIALIZE_BASELINE='1' if args.initialize_baseline else '0',
                 DEMO_RESUME_IDLE='1' if args.resume_idle else '0',DEMO_SCAN_MARKETS=str(args.scan_markets),
+                DEMO_DAILY_LIMITS='1' if args.daily_limits else '0',
                 DEMO_EXECUTION_TEST='1' if args.test_entry else '0',DEMO_RECOVER_ONLY='1' if args.recover_only else '0',
                 DEMO_MAX_SECONDS=str(min(args.seconds,90) if args.test_entry else args.seconds),DEMO_LEDGER_PATH=str(root/'ledger.sqlite'),
                 DEMO_ACCOUNT_SCOPE=binding['account_scope'],OKX_EXPECTED_UID=binding['uid'],

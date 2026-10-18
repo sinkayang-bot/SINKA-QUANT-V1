@@ -61,6 +61,35 @@ class DemoAuthorityTests(unittest.TestCase):
         self.assertFalse(self.authority.allows(self.candidate))
         self.assertTrue(self.authority.recovery_allowed())
 
+    def no_daily_limits(self):
+        self.journal=self.open_journal()
+        self.authority=DemoEntryAuthority(self.journal,account_scope='synthetic-v1',worker_id='demo',
+            clock=lambda:self.now,daily_limits_enabled=False)
+        self.ready()
+
+    def test_demo_policy_ignores_daily_halt_cap_and_cooldown_without_erasing_accounting(self):
+        self.no_daily_limits()
+        self.journal.db.execute('UPDATE demo_daily SET entries=6,loss_streak=3,halt=1,cooldown=?',(self.now+900000,))
+        before=self.journal.db.execute('SELECT * FROM demo_daily').fetchall()
+        self.assertTrue(self.authority.allows(self.candidate))
+        self.assertEqual(before,self.journal.db.execute('SELECT * FROM demo_daily').fetchall())
+        self.reserve()
+        self.assertEqual(self.journal.db.execute('SELECT entries,loss_streak,halt,cooldown FROM demo_daily').fetchone(),
+            (7,3,1,self.now+900000))
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_risk_entry').fetchone()[0],1)
+        self.assertTrue(self.authority.allows(self.candidate))
+
+    def test_no_daily_limits_still_requires_kill_switch_fresh_data_and_valid_accounting(self):
+        self.no_daily_limits()
+        self.authority.set_kill_switch(True)
+        self.assertFalse(self.authority.allows(self.candidate))
+        self.authority.set_kill_switch(False)
+        self.journal.db.execute('UPDATE demo_daily SET entries=-1')
+        self.assertFalse(self.authority.allows(self.candidate))
+        self.journal.db.execute('UPDATE demo_daily SET entries=0')
+        self.now+=5001
+        self.assertFalse(self.authority.allows(self.candidate))
+
     def test_two_workers_and_same_name_different_session_cannot_share_live_lease(self):
         self.ready()
         second = self.make_authority(self.open_journal(), worker="worker2", session="session2")

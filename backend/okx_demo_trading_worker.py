@@ -87,7 +87,8 @@ async def run_supervisor(supervisor,env):
         result=await supervisor.run(initialize_baseline=env.get('DEMO_INITIALIZE_BASELINE')=='1',
             arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',resume_idle=env.get('DEMO_RESUME_IDLE')=='1',on_status=progress)
         return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values()),
-            'entry_gate_counts':dict(progress.gate_counts),'last_entry_block':progress.last_entry_block}
+            'entry_gate_counts':dict(progress.gate_counts),'last_entry_block':progress.last_entry_block,
+            'daily_limits_enabled':supervisor.session.authority.daily_limits_enabled}
     finally:
         for signum in installed: loop.remove_signal_handler(signum)
 
@@ -100,6 +101,8 @@ def execute(environ=None):
     journal=None; owner=None
     try:
         execution_test=env.get('DEMO_EXECUTION_TEST')=='1'
+        daily_policy=env.get('DEMO_DAILY_LIMITS','1')
+        if daily_policy not in {'0','1'}: raise ValueError('Explicit daily-limit policy required')
         recover_only=env.get('DEMO_RECOVER_ONLY')=='1'
         if execution_test and recover_only: raise ValueError('Separate recovery mode required')
         duration=int(env.get('DEMO_MAX_SECONDS','300'))
@@ -126,7 +129,8 @@ def execute(environ=None):
             reader_args['symbol']=active_symbol
         reader=DemoSnapshotReader(trading,**reader_args)
         read_reader=DemoSnapshotReader(readonly,**reader_args)
-        owner=DemoEntryAuthority(journal,account_scope=reader.scope,worker_id='demo-strategy',clock=clock,enable_execution_test=execution_test)
+        owner=DemoEntryAuthority(journal,account_scope=reader.scope,worker_id='demo-strategy',clock=clock,
+            enable_execution_test=execution_test,daily_limits_enabled=daily_policy=='1')
         lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
         session=DemoTradingSession(lifecycle,reader,enabled=True,enable_execution_test=execution_test)
         reconciliation=DemoReconciliationRunner(lifecycle,read_reader,enabled=True)

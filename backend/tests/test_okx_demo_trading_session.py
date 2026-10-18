@@ -115,6 +115,17 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.f.posts),1)
         self.assertEqual(self.journal.db.execute('SELECT entries FROM demo_daily').fetchone()[0],1)
 
+    async def test_demo_without_daily_limits_enters_with_existing_halt_and_still_prevents_duplicate(self):
+        self.owner.daily_limits_enabled=False
+        self.journal.db.execute('UPDATE demo_daily SET entries=6,loss_streak=3,halt=1,cooldown=?',(self.f.now+900000,))
+        result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(len(self.f.posts),1)
+        self.assertTrue(self.f.posts[0][1]['attachAlgoOrds'])
+        self.assertEqual((await self.session.enter(args()))['phase'],'existing_intent_recovery_required')
+        self.assertEqual(len(self.f.posts),1)
+        self.assertEqual(self.journal.db.execute('SELECT entries,loss_streak,halt FROM demo_daily').fetchone(),(7,3,1))
+
     async def test_timeout_entry_is_queried_by_same_id_without_resubmission(self):
         self.f.timeout_entry=True
         result=await self.session.enter(args())

@@ -270,6 +270,9 @@ def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsy
     assert captured['DEMO_RESUME_IDLE']=='1'
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
     assert captured['DEMO_PROGRESS']=='1'
+    assert captured['DEMO_DAILY_LIMITS']=='0'
+    assert setup.main(['--run','--resume-idle','--daily-limits'])==0
+    assert captured['DEMO_DAILY_LIMITS']=='1'
     assert 'synthetic' not in capsys.readouterr().out
 
 

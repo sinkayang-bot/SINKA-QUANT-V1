@@ -27,7 +27,9 @@ def snapshot_digest(snapshot):
 
 
 class DemoEntryAuthority:
-    def __init__(self, journal, *, account_scope, worker_id, clock, session_id=None,enable_execution_test=False):
+    def __init__(self, journal, *, account_scope, worker_id, clock, session_id=None,enable_execution_test=False,daily_limits_enabled=True):
+        if type(daily_limits_enabled) is not bool:
+            raise ValueError('Explicit boolean daily-limit policy required')
         for value in (account_scope, worker_id):
             if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", value):
                 raise ValueError("Stable account and worker identity required")
@@ -42,6 +44,7 @@ class DemoEntryAuthority:
         self.approved = None
         self.seen_clock = 0
         self.execution_test_enabled=enable_execution_test is True
+        self.daily_limits_enabled=daily_limits_enabled
         self.db.execute("CREATE TABLE IF NOT EXISTS demo_authority ("
             "singleton INTEGER PRIMARY KEY CHECK(singleton=1),scope TEXT NOT NULL,"
             "worker TEXT,session TEXT,epoch INTEGER NOT NULL,expires INTEGER NOT NULL,"
@@ -266,14 +269,15 @@ class DemoEntryAuthority:
                     or positive(plan['modeled_loss_usdt'],'loss')>min(Decimal(1),equity*Decimal('.001'))):
                 raise ValueError('Execution-test minimum size and strict caps required')
         daily = self.db.execute("SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?", (day_key(now),)).fetchone()
-        if (daily is None or any(type(v) is not int or v < 0 for v in daily)
-                or daily[1] >= 3 or daily[2] or now < daily[3]):
+        if daily is None or any(type(v) is not int or v < 0 for v in daily):
+            raise ValueError('Valid daily accounting required')
+        if self.daily_limits_enabled and (daily[1] >= 3 or daily[2] or now < daily[3]):
             raise ValueError("Daily limit or cooldown")
         reserved = self.db.execute("SELECT day,epoch,session FROM demo_risk_entry WHERE id=?", (body["clOrdId"],)).fetchone()
         same = reserved == (day_key(now), self.epoch, self.session)
         if reserved is not None and not same:
             raise ValueError("Reservation belongs to an older execution session")
-        if daily[0] >= (7 if same else 6):
+        if self.daily_limits_enabled and daily[0] >= (7 if same else 6):
             raise ValueError("Daily entry limit")
 
     def allows(self, candidate):

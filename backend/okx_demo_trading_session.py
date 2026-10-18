@@ -113,11 +113,11 @@ class DemoTradingSession:
                 if not self.authority.allows(candidate):
                     now=self._owner()
                     daily=self.db.execute('SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(now),)).fetchone()
-                    if daily and (daily[1]>=3 or daily[2]):
+                    if self.authority.daily_limits_enabled and daily and (daily[1]>=3 or daily[2]):
                         return outcome('entry_gate_blocked')|{'gate_reason':'daily_risk_halt','retry_after_seconds':0}
-                    if daily and daily[0]>=6:
+                    if self.authority.daily_limits_enabled and daily and daily[0]>=6:
                         return outcome('entry_gate_blocked')|{'gate_reason':'daily_entry_limit','retry_after_seconds':0}
-                    if daily and now<daily[3]:
+                    if self.authority.daily_limits_enabled and daily and now<daily[3]:
                         return outcome('entry_gate_blocked')|{'gate_reason':'risk_cooldown','retry_after_seconds':(daily[3]-now+999)//1000}
                     return outcome('entry_gate_blocked')|{'gate_reason':'account_or_plan_verification','retry_after_seconds':0}
                 client_id=self.journal.register(candidate['plan'])
