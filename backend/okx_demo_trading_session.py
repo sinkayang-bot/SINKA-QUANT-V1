@@ -42,6 +42,8 @@ class DemoTradingSession:
         self.entry_stop_requested=False
         self.execution_test_enabled=enable_execution_test is True
         self.execution_test_diagnostics={}
+        self.recovery_protection_verified=False
+        self.recovery_stage='not_started'
         if not hasattr(self.authority,'reconciliation_lock'):
             self.authority.reconciliation_lock=asyncio.Lock()
         self.lock=self.authority.reconciliation_lock
@@ -146,7 +148,16 @@ class DemoTradingSession:
                 raise
             except Exception:
                 self.halt()
-                return outcome('blocked_reconciliation_required')
+                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage}
+
+    def _recovery_reader(self):
+        return DemoSnapshotReader(self.broker,account_scope=self.reader.scope,expected_uid=self.reader.uid,
+            symbol=self.reader.symbol,clock=self.reader.clock,recovery_only=True)
+
+    @staticmethod
+    def _recovery_values(snapshot):
+        return {k:v for k,v in snapshot.items() if k not in {
+            'received_at_ms','scan_finished_at_ms','equity_usdt','available_usdt'}}
 
     async def _evidence(self,client_id):
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
@@ -154,13 +165,18 @@ class DemoTradingSession:
         plan=json.loads(tracked[0]); body=plan['body']
         if body['instId'] != self.reader.symbol: raise ValueError('Reader/intent instrument mismatch')
         start=self._owner()
+        reader=self._recovery_reader()
         async with asyncio.timeout(5):
-            before=await self.reader.collect()
+            self.recovery_stage='snapshot_before'
+            before=await reader.collect()
+            self.recovery_stage='entry_lookup'
             first=await self.broker.lookup_entry(body['instId'],client_id)
             second=await self.broker.lookup_entry(body['instId'],client_id)
-            after=await self.reader.collect()
+            self.recovery_stage='snapshot_after'
+            after=await reader.collect()
+        self.recovery_stage='evidence_consistency'
         now=self._owner()
-        value=lambda snap:{k:v for k,v in snap.items() if k not in {'received_at_ms','scan_finished_at_ms'}}
+        value=self._recovery_values
         if (now-start>5000 or value(before)!=value(after) or first!=second
                 or first.get('code')!='0' or len(first.get('data',[]))!=1
                 or before.get('order_permission_verified') is not True):
@@ -187,7 +203,9 @@ class DemoTradingSession:
             self.halt()
             return await self._query_exit(existing)
         plan,snapshot,entry,evidence,stamp=await self._evidence(client_id)
+        self.recovery_stage='protection_assessment'
         assessment=assess_recovery(plan,evidence,now_ms=self._owner())
+        if assessment['protection_verified']: self.recovery_protection_verified=True
         if assessment['reason']=='invalid_or_stale_evidence': raise ValueError('Invalid recovery evidence')
         if entry.state in ACTIVE:
             # Cancel one owned remainder, durably once. Never treat ACK as cancellation.
@@ -266,12 +284,13 @@ class DemoTradingSession:
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
         client_id,encoded,expected_id=record
         body=json.loads(encoded); start=self._owner()
+        reader=self._recovery_reader()
         async with asyncio.timeout(5):
-            before=await self.reader.collect()
+            before=await reader.collect()
             first=await self.broker.lookup_reduction(body['instId'],client_id)
             second=await self.broker.lookup_reduction(body['instId'],client_id)
-            after=await self.reader.collect()
-        values=lambda snap:{k:v for k,v in snap.items() if k not in {'received_at_ms','scan_finished_at_ms'}}
+            after=await reader.collect()
+        values=self._recovery_values
         if (self._owner()-start>5000 or values(before)!=values(after) or first!=second
                 or first.get('code')!='0' or len(first.get('data',[]))!=1):
             raise ValueError('Exit query unavailable or inconsistent')

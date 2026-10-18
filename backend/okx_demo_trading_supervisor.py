@@ -18,7 +18,7 @@ from okx_risk import SYMBOLS
 
 
 class DemoTradingSupervisor:
-    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False,execution_test=False):
+    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False,execution_test=False,recover_only=False):
         if (type(session) is not DemoTradingSession or type(reconciliation) is not DemoReconciliationRunner
                 or reconciliation.lifecycle is not session.lifecycle
                 or type(reconciliation.reader.transport) is not OKXDemoReadTransport
@@ -35,6 +35,7 @@ class DemoTradingSupervisor:
         self.enabled=enabled is True
         self.scan_markets=scan_markets is True
         self.execution_test=execution_test is True
+        self.recover_only=recover_only is True
         if self.execution_test and (max_seconds>90 or self.scan_markets or not session.execution_test_enabled
                 or not session.authority.execution_test_enabled):
             raise ValueError('Explicit test admission in one-market mode required')
@@ -136,6 +137,18 @@ class DemoTradingSupervisor:
         self.started_at=owner._now()
         if not owner.acquire(): return outcome('lease_busy')
         try:
+            if self.recover_only:
+                owner.set_kill_switch(True)
+                row=self.session.db.execute('SELECT id,dispatched FROM demo_intent').fetchone()
+                if row is None: return outcome('no_active_intent_no_submission')|{'recovery_only':True}
+                if row[1]!=1: return outcome('unsubmitted_intent_preserved')|{'recovery_only':True}
+                # Existing tracked intent only. Never call the public source,
+                # entry arming, baseline initialization or session.enter.
+                result=await self._cleanup()
+                protected=self.session.recovery_protection_verified
+                flat=result['phase']=='flat_requires_emergency_settlement_review'
+                return result|dict(recovery_only=True,protection_verified=protected,flat_verified=flat,
+                    test_roundtrip_verified=protected and flat,strategy_performance_sample=False)
             active=self.session.db.execute('SELECT plan FROM demo_intent').fetchone()
             if self.execution_test and active is not None:
                 try: owned_test=json.loads(active[0]).get('purpose')=='execution_test'

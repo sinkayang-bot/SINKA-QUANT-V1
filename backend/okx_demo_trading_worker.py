@@ -83,6 +83,8 @@ def execute(environ=None):
     journal=None
     try:
         execution_test=env.get('DEMO_EXECUTION_TEST')=='1'
+        recover_only=env.get('DEMO_RECOVER_ONLY')=='1'
+        if execution_test and recover_only: raise ValueError('Separate recovery mode required')
         duration=int(env.get('DEMO_MAX_SECONDS','300'))
         if execution_test and (duration>90 or env.get('DEMO_SCAN_MARKETS')=='20'):
             raise ValueError('Bounded one-market execution test required')
@@ -92,7 +94,7 @@ def execute(environ=None):
         if not path.is_absolute() or not path.parent.is_dir(): raise ValueError('Durable ledger parent required')
         clock=lambda:int(time.time()*1000)
         credentials=DemoCredentials(env['OKX_API_KEY'],env['OKX_API_SECRET'],env['OKX_API_PASSPHRASE'])
-        trading=OKXDemoTradingTransport(credentials,enable_demo_requests=True,enable_demo_orders=True,clock=clock)
+        trading=OKXDemoTradingTransport(credentials,enable_demo_requests=True,enable_demo_orders=True,allow_demo_entries=not recover_only,clock=clock)
         readonly=OKXDemoReadTransport(credentials,enable_demo_requests=True,clock=clock)
         reader_args=dict(account_scope=env['DEMO_ACCOUNT_SCOPE'],expected_uid=env['OKX_EXPECTED_UID'],
             symbol=env.get('DEMO_SYMBOL','BTC-USDT-SWAP'),clock=clock)
@@ -112,9 +114,9 @@ def execute(environ=None):
         session=DemoTradingSession(lifecycle,reader,enabled=True,enable_execution_test=execution_test)
         reconciliation=DemoReconciliationRunner(lifecycle,read_reader,enabled=True)
         supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner() if multi else DemoStrategySource(execution_test=execution_test),enabled=True,
-            max_seconds=duration,poll_seconds=poll,scan_markets=multi,execution_test=execution_test)
+            max_seconds=duration,poll_seconds=poll,scan_markets=multi,execution_test=execution_test,recover_only=recover_only)
         result=asyncio.run(run_supervisor(supervisor,env))
-        clean=((execution_test and result.get('test_roundtrip_verified') is True) or result['phase']=='verified_but_not_armed' or
+        clean=((recover_only and result.get('flat_verified') is True) or (execution_test and result.get('test_roundtrip_verified') is True) or result['phase']=='verified_but_not_armed' or
             (result['phase']=='stopped_no_active_intent' and result.get('stop_reason') in {'stop_requested','runtime_limit'}))
         return result,0 if clean else 2
     except KeyboardInterrupt:

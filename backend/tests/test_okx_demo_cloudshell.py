@@ -273,3 +273,23 @@ def test_one_shot_entry_uses_same_worker_and_bounded_runtime(monkeypatch,capsys)
     assert captured['DEMO_LEDGER_PATH'].endswith('/sinka-demo-trial/ledger.sqlite')
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
     assert 'synthetic' not in capsys.readouterr().out
+
+
+def test_recover_only_uses_existing_worker_without_entry_or_baseline_optin(monkeypatch,capsys):
+    captured={};prepare_args={}
+    monkeypatch.setattr(setup,'persistent_storage',lambda path:None)
+    monkeypatch.setattr(setup,'credentials',lambda:DemoCredentials('synthetic','synthetic','synthetic'))
+    def prepare(*args,**kwargs):
+        prepare_args.update(kwargs);return {'account_scope':'scope','uid':'123'},False
+    monkeypatch.setattr(setup,'prepare',prepare)
+    monkeypatch.setattr(setup,'command',lambda args:'v24.21.0')
+    def execute(env):
+        captured.update(env);return {'phase':'recovery_result'},0
+    monkeypatch.setattr(setup,'execute',execute)
+    assert setup.main(['--run','--recover-only','--seconds','90'])==0
+    assert captured['DEMO_RECOVER_ONLY']=='1'
+    assert captured['DEMO_ARM_ENTRIES']=='0'
+    assert captured['DEMO_EXECUTION_TEST']=='0'
+    assert captured['DEMO_INITIALIZE_BASELINE']=='0'
+    assert prepare_args['recovery_only'] is True
+    assert 'synthetic' not in capsys.readouterr().out

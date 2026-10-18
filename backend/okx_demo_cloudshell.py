@@ -153,7 +153,7 @@ def persistent_storage(root):
     except Exception: raise SetupBlocked('persistent_storage_check_failed') from None
 
 
-async def account_check(creds,binding=None):
+async def account_check(creds,binding=None,*,recovery_only=False):
     clock=lambda:int(time.time()*1000)
     transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
     stage='demo_config_connection_failed'
@@ -175,7 +175,7 @@ async def account_check(creds,binding=None):
             raise SetupBlocked('demo_net_position_mode_required')
         if row.get('acctLv') not in {'2','3'}:
             raise SetupBlocked('demo_futures_or_multi_currency_account_required')
-        reader=DemoSnapshotReader(transport,account_scope=scope,expected_uid=uid,symbol=SYMBOL,clock=clock)
+        reader=DemoSnapshotReader(transport,account_scope=scope,expected_uid=uid,symbol=SYMBOL,clock=clock,recovery_only=recovery_only)
         stage='demo_api_permission_configuration_invalid'
         mode=reader._config([row])
         if mode['order_permission_verified'] is not True:
@@ -243,16 +243,16 @@ async def account_check(creds,binding=None):
         raise SetupBlocked(stage) from None
 
 
-def prepare(root,creds,*,require_binding=False):
+def prepare(root,creds,*,require_binding=False,recovery_only=False):
     persistent_storage(root)
     path=root/'account.json'; binding=None
     try:
         if path.exists(): binding=json.loads(path.read_text())
-        elif require_binding or (root/'ledger.sqlite').exists():
+        elif require_binding or recovery_only or (root/'ledger.sqlite').exists():
             raise SetupBlocked('prior_pinned_binding_required')
     except SetupBlocked: raise
     except Exception: raise SetupBlocked('pinned_binding_invalid') from None
-    expected,flat=asyncio.run(account_check(creds,binding))
+    expected,flat=asyncio.run(account_check(creds,binding,recovery_only=True) if recovery_only else account_check(creds,binding))
     if binding is None:
         try:
             descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -268,6 +268,7 @@ def main(argv=None):
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--run',action='store_true')
     parser.add_argument('--initialize-baseline',action='store_true')
+    parser.add_argument('--recover-only',action='store_true',help='Recover the existing tracked intent without any new entry')
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
     parser.add_argument('--scan-markets',type=int,choices=(1,20),default=1)
     parser.add_argument('--resume-idle',action='store_true',help='Reconcile a never-traded idle baseline up to 12 hours old')
@@ -283,7 +284,7 @@ def main(argv=None):
         root=Path.home()/'sinka-demo-trial'
         persistent_storage(root)  # Reject ephemeral storage before reading any Secret.
         creds=credentials()
-        binding,flat=prepare(root,creds,require_binding=args.run)
+        binding,flat=prepare(root,creds,require_binding=args.run,recovery_only=args.recover_only and args.run)
         if args.check:
             result.update(phase='demo_account_verified',account_binding_pinned=True,
                           trade_permission_verified=True,flat_clean=flat,persistent_storage_verified=True)
@@ -292,10 +293,10 @@ def main(argv=None):
             version=command(['node','--version']).strip()
             if not re.fullmatch(r'v(?:22|24)\.[0-9]+\.[0-9]+',version):
                 raise SetupBlocked('supported_node_runtime_required')
-            env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='1',DEMO_PROGRESS='1',
+            env=dict(RUN_DEMO_TRADING='1',DEMO_TRADING_AUTHORIZED='1',DEMO_ARM_ENTRIES='0' if args.recover_only else '1',DEMO_PROGRESS='1',
                 DEMO_INITIALIZE_BASELINE='1' if args.initialize_baseline else '0',
                 DEMO_RESUME_IDLE='1' if args.resume_idle else '0',DEMO_SCAN_MARKETS=str(args.scan_markets),
-                DEMO_EXECUTION_TEST='1' if args.test_entry else '0',
+                DEMO_EXECUTION_TEST='1' if args.test_entry else '0',DEMO_RECOVER_ONLY='1' if args.recover_only else '0',
                 DEMO_MAX_SECONDS=str(min(args.seconds,90) if args.test_entry else args.seconds),DEMO_LEDGER_PATH=str(root/'ledger.sqlite'),
                 DEMO_ACCOUNT_SCOPE=binding['account_scope'],OKX_EXPECTED_UID=binding['uid'],
                 DEMO_SYMBOL=SYMBOL,OKX_API_KEY=creds.key,OKX_API_SECRET=creds.secret,OKX_API_PASSPHRASE=creds.passphrase)

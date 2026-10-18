@@ -7,9 +7,10 @@ from okx_risk import SYMBOLS
 
 
 class OKXDemoTradingTransport(OKXDemoTransport):
-    def __init__(self, *args, enable_demo_orders=False, **kwargs):
+    def __init__(self, *args, enable_demo_orders=False,allow_demo_entries=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.orders_enabled = enable_demo_orders is True
+        self.entries_enabled=allow_demo_entries is True
 
     def _require_orders(self):
         self._require_enabled()
@@ -18,6 +19,8 @@ class OKXDemoTradingTransport(OKXDemoTransport):
 
     async def place_entry(self, body, headers, *, deadline_ms=None):
         self._require_orders()
+        if not self.entries_enabled:
+            raise DemoTransportError('Recovery-only transport cannot place entries')
         return await super().place_entry(body, headers, deadline_ms=deadline_ms)
 
     async def cancel_entry(self, body, headers):

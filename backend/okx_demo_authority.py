@@ -193,6 +193,8 @@ class DemoEntryAuthority:
         if owner[5]:
             raise ValueError("Kill switch active")
         spec = self._validate_snapshot(self.snapshot, now)
+        if self.snapshot.get('recovery_only') is True:
+            raise ValueError('Recovery snapshots cannot authorize entry')
         self._verify_audit_receipt(self.snapshot, now)
         cycles=self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_cycle_state'").fetchone()
         if cycles:

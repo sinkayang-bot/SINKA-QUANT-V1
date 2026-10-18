@@ -34,12 +34,13 @@ def canonical(rows):
 
 
 class DemoSnapshotReader:
-    def __init__(self, transport, *, account_scope, expected_uid, symbol, clock):
+    def __init__(self, transport, *, account_scope, expected_uid, symbol, clock,recovery_only=False):
         if not isinstance(transport, OKXDemoTransport) or transport.environment != "demo":
             raise ValueError("Fixed demo transport required")
         if not isinstance(account_scope, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", account_scope) or symbol not in SYMBOLS:
             raise ValueError("Configured account scope and symbol required")
         self.transport, self.scope, self.uid, self.symbol, self.clock = transport, account_scope, digits(expected_uid), symbol, clock
+        self.recovery_only=recovery_only is True
         self.last_snapshot = None
 
     async def _read(self, kind, **params):
@@ -182,7 +183,10 @@ class DemoSnapshotReader:
                     first = await self._pass(config)
                     second = await self._pass()
             end = timestamp(self.clock())
-            if first != second or not 0 <= end - start <= 5000:
+            if self.recovery_only and (first['cash'] is None or second['cash'] is None):
+                raise ValueError('Recovery requires verified cash balance')
+            stable=lambda data:{k:v for k,v in data.items() if not self.recovery_only or k not in {'equity','available'}}
+            if stable(first) != stable(second) or not 0 <= end - start <= 5000:
                 raise ValueError("Account changed or scan expired")
             snapshot = {"account_scope":self.scope, "symbol":self.symbol,
                 "demo_verified":True, "complete":True, "monitor_healthy":True,
@@ -195,6 +199,7 @@ class DemoSnapshotReader:
                 "cash_balance_usdt":second["cash"],
                 "positions":second["positions"], "pending_orders":second["orders"], "pending_algos":second["algos"],
                 "recent_fills":second["fills"], "fill_history_complete":False, "fill_audit_ready":False}
+            if self.recovery_only: snapshot['recovery_only']=True
             self.last_snapshot = deepcopy(snapshot)
             return snapshot
         except Exception:

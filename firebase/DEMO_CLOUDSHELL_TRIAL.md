@@ -203,3 +203,25 @@ Do not delete the ledger or repeat the test to bypass an unresolved result.
 ```bash
 "$HOME/sinka-demo-venv/bin/python" "$SINKA_SETUP_DIR/backend/okx_demo_cloudshell.py" --run --resume-idle --test-entry --seconds 90
 ```
+
+### Recovery-only snapshots and interrupted test recovery
+
+After a real demo entry, unrealized PnL can change USDT equity and available
+margin between reads without changing the position. Recovery snapshots now
+exclude only those two mark-sensitive values from equality checks. They still
+require valid positive/bounded amounts, identical UID/config, leverage, specs,
+position identities/quantities, fills, cash, orders and algos, and the original
+five-second evidence budget. They carry `recovery_only=true`; the entry
+authority expressly rejects them for any new order admission. Flat pre-entry
+and idle/settlement readers retain their original strict equality checks.
+
+`--run --recover-only --seconds 90` uses the existing account binding and tracked
+intent. It never fetches an entry signal, initializes a baseline, arms entries
+or calls `session.enter`. It keeps the kill switch on and uses bounded existing
+owned-intent shutdown/recovery, including only an already-owned cancellation or
+reduce-only exit where fresh quantity evidence permits it. Unknown writes are
+never retried. With no active intent it reports `no_active_intent_no_submission`.
+A manual close is not reported as a verified tracked reduce-only exit and still
+requires fill/cash settlement review. Do not run an entry test after manually
+closing to bypass the retained intent. Use `--check` for a GET-only flat/clean
+account check, and keep all original records.
