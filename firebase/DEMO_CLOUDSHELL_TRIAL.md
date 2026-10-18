@@ -1,5 +1,12 @@
 # Cloud Shell 人工限時驗收
 
+Scanner progress splits `no_signal` into `breakout_not_met`, `trend_not_met`,
+`warmup`, and `invalid_stop`. Their sum must equal `no_signal`; `expired` and
+`prestart` remain separate. Counts describe the current scan, not unique trade
+opportunities. The strategy still uses confirmed 5-minute candles, a 40-bar
+zone and a 0.25 ATR breakout plus candle/EMA trend filters. Diagnostics neither
+relax entry rules nor increase the number of qualifying signals.
+
 ## 模擬帳戶的每日限制政策
 
 依使用者設定，Cloud Shell 模擬 `--run` 現在預設傳入 `DEMO_DAILY_LIMITS=0`：

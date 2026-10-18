@@ -69,7 +69,8 @@ class DemoProgress:
                 if isinstance(scan,dict):
                     payload['scan']={k:v for k,v in scan.items() if k in {
                         'universe','eligible','checked','no_signal','expired','prestart',
-                        'fetch_failed','signals','excluded'} and type(v) is int and 0<=v<=20}
+                        'fetch_failed','signals','excluded','breakout_not_met','trend_not_met',
+                        'warmup','invalid_stop'} and type(v) is int and 0<=v<=20}
                 if result.get('selected_symbol') in SYMBOLS:
                     payload['selected_symbol']=result['selected_symbol']
                 print(json.dumps(payload,sort_keys=True,separators=(',',':')),flush=True)

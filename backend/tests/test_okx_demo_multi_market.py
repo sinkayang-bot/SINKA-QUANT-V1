@@ -86,6 +86,12 @@ class ScannerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await scanner('BTC-USDT-SWAP',1))
         self.assertEqual(set(captured['env']),{'PATH'})
         self.assertEqual(scanner.last_scan['excluded'],1)
+        payload['scan'].update(breakout_not_met=18,trend_not_met=1,warmup=0,invalid_stop=0)
+        with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',side_effect=spawn):
+            await scanner('BTC-USDT-SWAP',1)
+            self.assertEqual(scanner.last_scan['breakout_not_met'],18)
+            payload['scan']['breakout_not_met']=17
+            with self.assertRaises(ValueError): await scanner('BTC-USDT-SWAP',1)
 
     async def test_cancelled_scanner_kills_and_reaps_child(self):
         started=asyncio.Event();calls=[]
@@ -115,7 +121,8 @@ class PublicUniverseTests(unittest.TestCase):
     def test_liquidity_filters_and_twenty_market_scan_use_only_public_gets(self):
         script=r'''
         import assert from 'node:assert/strict';
-        import {eligibleMarkets,scanMarkets} from './strategy/demo-market-scan.mjs';
+        import {eligibleMarkets,scanMarkets,noSignalReason} from './strategy/demo-market-scan.mjs';
+        import {analyze} from './strategy/snr-engine.mjs';
         import {SCAN_SYMBOLS as SYMBOLS} from './strategy/demo-market-scan.mjs';
         const now=1800000301000, started=now-2000;
         const ins=SYMBOLS.map(instId=>({instId,instType:'SWAP',state:'live',ctType:'linear',settleCcy:'USDT',
@@ -151,6 +158,17 @@ class PublicUniverseTests(unittest.TestCase):
         assert.equal(calls,42);assert.ok(max<=8);
         const old=await scanMarkets({startedAt:now,fetcher,clock:()=>now});
         assert.equal(old.sources.length,0);assert.equal(old.scan.prestart,20);
+        const flat=Array.from({length:81},(_,i)=>({ts:i*300000,o:100,h:100.4,l:99.6,c:100}));
+        assert.equal(noSignalReason(analyze(flat),flat),'breakout_not_met');
+        assert.equal(noSignalReason(analyze(flat.slice(0,80)),flat.slice(0,80)),'warmup');
+        const rejected={reason:'no_signal',support:99,resistance:101,atr:1};
+        assert.equal(noSignalReason(rejected,[{c:101.25}]),'breakout_not_met');
+        assert.equal(noSignalReason(rejected,[{c:101.26}]),'trend_not_met');
+        assert.equal(noSignalReason(rejected,[{c:98.74}]),'trend_not_met');
+        candles.at(-1)[2]='100.4';candles.at(-1)[4]='100';
+        const quiet=await scanMarkets({startedAt:started,fetcher,clock:()=>now});
+        assert.equal(quiet.scan.no_signal,20);assert.equal(quiet.scan.breakout_not_met,20);
+        assert.equal(quiet.scan.trend_not_met,0);assert.equal(quiet.sources.length,0);
         console.log(JSON.stringify(SYMBOLS));
         '''
         result=subprocess.run(['node','--input-type=module','-e',script],cwd=Path(__file__).resolve().parents[2],capture_output=True,text=True,timeout=15)

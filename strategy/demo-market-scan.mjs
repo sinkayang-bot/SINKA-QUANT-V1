@@ -6,6 +6,16 @@ import {parseCandles,validateSnapshot} from './public-market.mjs';
 export const SCAN_SYMBOLS=Object.freeze(['BTC','ETH','SOL','XRP','DOGE','ADA','AVAX','LINK','DOT','LTC','BCH','TRX','TON','SUI','NEAR','APT','ATOM','UNI','ETC','FIL'].map(x=>x+'-USDT-SWAP'));
 const SYMBOLS=SCAN_SYMBOLS;
 
+// Diagnostic labels only; the original strategy still decides every entry.
+export function noSignalReason(result,bars){
+  if(result.reason==='warmup')return 'warmup';
+  if(result.reason==='invalid_stop')return 'invalid_stop';
+  if(result.reason!=='no_signal')throw Error('Not a rejected strategy result');
+  const c=bars.at(-1).c;
+  return c>result.resistance+RULES.breakoutATR*result.atr||c<result.support-RULES.breakoutATR*result.atr
+    ?'trend_not_met':'breakout_not_met';
+}
+
 export function eligibleMarkets(instruments,tickers,now) {
   if(!Array.isArray(instruments)||!Array.isArray(tickers)||instruments.length>5000||tickers.length>5000)throw Error('Invalid inventory');
   const eligible=[];
@@ -39,7 +49,8 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
     inventory('/api/v5/public/instruments',{instType:'SWAP'},fetcher,signal),
     inventory('/api/v5/market/tickers',{instType:'SWAP'},fetcher,signal)]);
   const markets=eligibleMarkets(instruments,tickers,clock()),sources=[];
-  const scan={universe:SYMBOLS.length,eligible:markets.length,checked:0,no_signal:0,expired:0,prestart:0,fetch_failed:0,signals:0};
+  const scan={universe:SYMBOLS.length,eligible:markets.length,checked:0,no_signal:0,expired:0,prestart:0,fetch_failed:0,signals:0,
+    breakout_not_met:0,trend_not_met:0,warmup:0,invalid_stop:0};
   let cursor=0;
   async function worker(){
     for(;;){
@@ -53,7 +64,7 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
         const snapshot={bars:parseCandles(candles),price:Number(quotes[0].last),quoteTs:Number(quotes[0].ts)};
         const now=clock();validateSnapshot(snapshot,now);
         const result=analyze(snapshot.bars);scan.checked++;
-        if(result.reason!=='signal'){scan.no_signal++;continue;}
+        if(result.reason!=='signal'){scan[noSignalReason(result,snapshot.bars)]++;scan.no_signal++;continue;}
         if(result.readyAt<=startedAt){scan.prestart++;continue;}
         if(now-result.readyAt>RULES.signalAgeMs||snapshot.quoteTs>now){scan.expired++;continue;}
         const source={strategy_version:RULES.version,signal:result,

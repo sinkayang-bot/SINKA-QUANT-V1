@@ -7,6 +7,7 @@ from okx_risk import SYMBOLS
 from okx_strategy_bridge import timestamp
 
 SCAN_FIELDS=frozenset({'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals'})
+REASON_FIELDS=frozenset({'breakout_not_met','trend_not_met','warmup','invalid_stop'})
 
 class DemoMarketScanner:
     def __init__(self):
@@ -28,12 +29,14 @@ class DemoMarketScanner:
             payload=json.loads(output)
             if not isinstance(payload,dict) or set(payload)!={'sources','scan'}: raise ValueError()
             scan=payload['scan']; sources=payload['sources']
-            if (not isinstance(scan,dict) or set(scan)!=SCAN_FIELDS
+            if (not isinstance(scan,dict) or set(scan) not in (SCAN_FIELDS,SCAN_FIELDS|REASON_FIELDS)
                     or any(type(v) is not int or not 0<=v<=20 for v in scan.values())
                     or scan['universe']!=20 or not isinstance(sources,list) or len(sources)>20): raise ValueError()
             if (scan['signals']!=len(sources) or scan['checked']+scan['fetch_failed']!=scan['eligible']
                     or sum(scan[k] for k in ('no_signal','expired','prestart','signals'))!=scan['checked']):
                 raise ValueError()
+            if REASON_FIELDS<=scan.keys() and sum(scan[k] for k in REASON_FIELDS)!=scan['no_signal']:
+                raise ValueError('Rejected-market breakdown mismatch')
             seen=set()
             for source in sources:
                 if not isinstance(source,dict) or set(source)!={'strategy_version','signal','quote'}: raise ValueError()
