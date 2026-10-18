@@ -2,6 +2,18 @@
 
 ## 已人工平倉的測試單結案
 
+`--audit-trade` 也可核對程式自動減倉：減倉委託必須符合原有 durable reservation、
+原始 client ID、已知 exchange order ID（若有）、reduce-only 參數與完整帳務，
+才輸出 `automatic_exit_verified: true`、`closure_source: tracked_emergency_exit`。
+`test_roundtrip_verified` 仍為 false；自動減倉不等於原生止盈止損驗證成功。
+唯讀核對會另查兩次附掛策略單詳情，只輸出狀態、類型、缺失欄位與符合與否，
+不顯示委託 ID 或原始回應。詳情查不到不會推斷曾有保護；歷史詳情即使吻合，
+也不代表退出前已驗證為 live。這些查詢不下新單，不改帳本。
+
+若 `--close-reviewed-test` 辨識為程式既有減倉，其正式封存來源會記為
+`tracked_emergency_exit`，輸出 `tracked_test_exit_closed_and_archived`，並保存
+完整減倉 reservation 證據。停單、風控及原生保護尚未通過的標記都保留。
+
 `--audit-trade` 只讀核對進場、人工平倉、完整雙次帳單及原始現金差額，不改帳本。
 `--close-reviewed-test` 會重新取得雙次完整證據；只有固定 BTC 模擬測試單、
 完整同向進場與反向 reduce-only 平倉、成交與帳單逐筆一致、原始合約規格及

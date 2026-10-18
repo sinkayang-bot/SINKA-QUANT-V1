@@ -43,6 +43,7 @@ class ManualCloseTests(unittest.TestCase):
         self.db.execute('CREATE TABLE demo_emergency_exit(entry_id TEXT PRIMARY KEY,client_id TEXT UNIQUE,body TEXT,status TEXT,exchange_order_id TEXT)')
         tombstone=(self.saved['client'],'sr'+'a'*28,'{}','unknown',None)
         self.db.execute('INSERT INTO demo_emergency_exit VALUES(?,?,?,?,?)',tombstone)
+        self.saved=retained_in_transaction(self.db,self.t.authority.scope)
         self.assertTrue(unresolved_emergency_exit(self.db))
         before=self.records(); entries=self.db.execute('SELECT * FROM demo_risk_entry').fetchall()
         result=self.close()
@@ -79,6 +80,22 @@ class ManualCloseTests(unittest.TestCase):
         self.bills.update(through_ms=self.t.now,received_at_ms=self.t.now)
         self.bills['query']['end']=str(self.t.now)
         self.assertTrue(self.close()['ledger_archived'])
+
+    def test_tracked_exit_is_archived_as_automatic_reduction_without_claiming_native_protection(self):
+        self.db.execute('CREATE TABLE demo_emergency_exit(entry_id TEXT PRIMARY KEY,client_id TEXT UNIQUE,body TEXT,status TEXT,exchange_order_id TEXT)')
+        self.closing['clOrdId']='sr'+'b'*28
+        body={k:self.closing[k] for k in ('instId','tdMode','posSide','side','ordType','sz','clOrdId')}; body['reduceOnly']=True
+        self.db.execute('INSERT INTO demo_emergency_exit VALUES(?,?,?,?,?)',
+            (self.saved['client'],self.closing['clOrdId'],json.dumps(body),'acknowledged',self.closing['ordId']))
+        self.saved=retained_in_transaction(self.db,self.t.authority.scope)
+        result=self.close()
+        self.assertEqual(result['phase'],'tracked_test_exit_closed_and_archived')
+        self.assertTrue(result['automatic_exit_verified'])
+        self.assertFalse(result['test_roundtrip_verified'])
+        archived=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive').fetchone()[0])
+        self.assertEqual(archived['settlement']['closure_source'],'tracked_emergency_exit')
+        self.assertEqual(archived['settlement']['close_evidence']['reduction_record'],self.saved['reduction'])
+        self.assertFalse(unresolved_emergency_exit(self.db))
 
     def test_next_test_requires_current_archive_identity_and_keeps_cooldown(self):
         self.close(); boundary=self.snapshot['received_at_ms']

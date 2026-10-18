@@ -1,10 +1,12 @@
-"""Read-only evidence report for a retained execution test closed outside the worker.
+"""Read-only evidence report for a retained test closed manually or by reduction.
 
 Never settles, unlocks, resets or submits. A matching report is informational;
-manual exit evidence does not verify the automatic exit path.
+An automatic reduction must match its durable reservation and complete fills;
+historical algo details never verify live protection before the exit.
 """
 import asyncio
 import json
+import re
 import sqlite3
 import time
 from contextlib import closing
@@ -39,8 +41,13 @@ def retained_in_transaction(db,scope):
             or plan['body'].get('clOrdId')!=client or plan['body'].get('instId')!='BTC-USDT-SWAP'
             or not order_id):
         raise ValueError('Retained acknowledged BTC demo test required')
-    return dict(client=client,body=plan['body'],order_id=order_id,
+    result=dict(client=client,body=plan['body'],order_id=order_id,
                 begin=meta[1],cash=money(cash[0]),baseline=baseline)
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_emergency_exit'").fetchone():
+        reduction=db.execute('SELECT client_id,body,exchange_order_id FROM demo_emergency_exit WHERE entry_id=?',(client,)).fetchone()
+        if reduction:
+            result['reduction']=dict(client_id=reduction[0],body=json.loads(reduction[1]),order_id=reduction[2])
+    return result
 
 
 def order_row(response):
@@ -54,7 +61,7 @@ def assess(saved, bundle, entry, closing):
     snap=bundle['snapshot']; evidence=bundle['bills']; through=evidence['through_ms']
     body=saved['body']; symbol=body['instId']; qty=Decimal(money(body['sz'],positive_only=True))
     report=dict(ledger_changed=False,new_entry_allowed=False,automatic_exit_verified=False,
-                review_only=True,as_of_ms=through)
+                native_protection_verified=False,test_roundtrip_verified=False,review_only=True,as_of_ms=through)
     checks={}
     checks['flat_clean']=not snap['pending_orders'] and not snap['pending_algos'] and all(Decimal(p['pos'])==0 for p in snap['positions'])
     fills={}
@@ -125,7 +132,48 @@ def assess(saved, bundle, entry, closing):
     checks['close_reporting_delay_elapsed']=bool(exited) and through>=max(int(f['fillTime']) for f in exited.values())+5000
     report.update(checks=checks,evidence_matches=all(checks.values()),
                   phase='manual_close_evidence_matches' if all(checks.values()) else 'manual_close_review_required')
+    reduction=saved.get('reduction')
+    tracked=False
+    if reduction and closing is not None:
+        expected=reduction['body']
+        tracked=(closing.get('clOrdId')==reduction['client_id']
+            and (reduction['order_id'] is None or closing.get('ordId')==reduction['order_id'])
+            and expected.get('clOrdId')==reduction['client_id']
+            and expected.get('reduceOnly') is True
+            and all(closing.get(k)==expected.get(k) for k in ('instId','tdMode','posSide','side','ordType'))
+            and Decimal(money(closing.get('sz')))==Decimal(money(expected.get('sz'))))
+    report['closure_source']='tracked_emergency_exit' if tracked else 'manual_or_untracked_close'
+    report['automatic_exit_verified']=tracked and report['evidence_matches']
+    if tracked:
+        report['phase']='tracked_exit_evidence_matches' if report['evidence_matches'] else 'tracked_exit_review_required'
     return report
+
+
+def protection_detail(saved,response):
+    """Historical algo shape only; never a proof of live protection before exit."""
+    code=response.get('code')
+    result=dict(api_code=code if isinstance(code,str) and re.fullmatch(r'[0-9]{1,8}',code) else 'unknown',
+                historical_only=True,live_protection_verified=False)
+    rows=response.get('data',[])
+    if code!='0' or not isinstance(rows,list) or len(rows)!=1:
+        result['detail_available']=False; return result
+    row=rows[0]; body=saved['body']; bracket=body['attachAlgoOrds'][0]
+    def same_number(field,expected):
+        try: return Decimal(money(row.get(field)))==Decimal(money(expected))
+        except (ValueError,TypeError): return False
+    result.update(detail_available=True,
+        state=row.get('state') if row.get('state') in {'live','pause','canceled','effective','order_failed','partially_failed','partially_effective'} else 'other',
+        order_type=row.get('ordType') if row.get('ordType') in {'oco','conditional','trigger','move_order_stop','chase'} else 'other',
+        missing_fields=[k for k in ('algoClOrdId','instType','posSide','tdMode','side','sz','reduceOnly','tpTriggerPx','slTriggerPx','tpOrdPx','slOrdPx','tpTriggerPxType','slTriggerPxType') if row.get(k) in (None,'')],
+        matches=dict(client_identity=row.get('algoClOrdId')==bracket['attachAlgoClOrdId'],
+            instrument=row.get('instId')==body['instId'],instrument_type=row.get('instType')=='SWAP',
+            position_side=row.get('posSide')=='net',margin_mode=row.get('tdMode')=='isolated',
+            side=row.get('side')==('sell' if body['side']=='buy' else 'buy'),
+            reduce_only=row.get('reduceOnly') in (True,'true'),
+            fixed_size=same_number('sz',body['sz']),close_fraction_empty=row.get('closeFraction','')=='',
+            **{k:(same_number(k,bracket[k]) if k in {'tpTriggerPx','slTriggerPx'} else row.get(k)==bracket[k])
+                for k in ('tpTriggerPx','slTriggerPx','tpOrdPx','slOrdPx','tpTriggerPxType','slTriggerPxType')}))
+    return result
 
 
 async def audit_trade(path, binding, creds):
@@ -139,4 +187,12 @@ async def audit_trade(path, binding, creds):
         exit_ids={f['ordId'] for f in bundle['snapshot']['recent_fills']
                   if key(normalize_fill(f,bundle['bills']['through_ms'])) not in saved['baseline'] and f['ordId']!=saved['order_id']}
         closing=order_row(await transport.lookup_child(saved['body']['instId'],next(iter(exit_ids)))) if len(exit_ids)==1 else None
-        return assess(saved,bundle,entry,closing)
+        report=assess(saved,bundle,entry,closing)
+        try:
+            attached=saved['body']['attachAlgoOrds'][0]['attachAlgoClOrdId']
+            first=await transport.lookup_algo(attached)
+            second=await transport.lookup_algo(attached)
+            report['protection_detail']=protection_detail(saved,first) if first==second else dict(detail_available=False,reason='detail_changed',historical_only=True,live_protection_verified=False)
+        except Exception:
+            report['protection_detail']=dict(detail_available=False,reason='detail_read_unavailable',historical_only=True,live_protection_verified=False)
+        return report

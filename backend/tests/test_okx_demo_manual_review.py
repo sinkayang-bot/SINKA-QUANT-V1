@@ -4,7 +4,7 @@ import json
 import sqlite3
 
 import pytest
-from okx_demo_manual_review import assess, retained_test
+from okx_demo_manual_review import assess, retained_test,protection_detail
 
 
 def fixture():
@@ -34,6 +34,39 @@ def test_matching_manual_close_preserves_automatic_exit_failure():
     assert result['automatic_exit_verified'] is False
     assert result['new_entry_allowed'] is False and result['ledger_changed'] is False
     assert result['bill_fill_mismatches']=={}
+
+
+def test_tracked_reduction_requires_exact_journal_and_full_cash_proof():
+    saved,bundle,entry,close=fixture()
+    close['clOrdId']='sr'+'b'*28
+    body={k:close[k] for k in ('instId','tdMode','posSide','side','ordType','sz','clOrdId')}; body['reduceOnly']=True
+    saved['reduction']=dict(client_id=close['clOrdId'],body=body,order_id=close['ordId'])
+    report=assess(saved,bundle,entry,close)
+    assert report['automatic_exit_verified']
+    assert report['closure_source']=='tracked_emergency_exit'
+    assert not report['test_roundtrip_verified'] and not report['native_protection_verified']
+    assert not report['new_entry_allowed']
+    bundle['snapshot']['cash_balance_usdt']='99'
+    assert not assess(saved,bundle,entry,close)['automatic_exit_verified']
+    saved['reduction']['order_id']='999'
+    assert assess(saved,bundle,entry,close)['closure_source']=='manual_or_untracked_close'
+
+
+def test_historical_protection_detail_never_claims_live_verification_or_prints_ids():
+    saved,_,_,_=fixture()
+    bracket=dict(attachAlgoClOrdId='sa'+'a'*28,tpTriggerPx='110',slTriggerPx='90',tpOrdPx='-1',slOrdPx='-1',tpTriggerPxType='last',slTriggerPxType='last')
+    saved['body']['attachAlgoOrds']=[bracket]
+    row=dict(algoClOrdId=bracket['attachAlgoClOrdId'],instId='BTC-USDT-SWAP',instType='SWAP',state='canceled',ordType='conditional',
+        posSide='net',tdMode='isolated',side='sell',sz='1',reduceOnly='true',**{k:v for k,v in bracket.items() if k!='attachAlgoClOrdId'})
+    report=protection_detail(saved,dict(code='0',data=[row]))
+    assert report['detail_available'] and report['order_type']=='conditional'
+    assert all(report['matches'].values())
+    assert not report['live_protection_verified']
+    assert bracket['attachAlgoClOrdId'] not in json.dumps(report)
+    row['sz']=''
+    report=protection_detail(saved,dict(code='0',data=[row]))
+    assert 'sz' in report['missing_fields'] and not report['matches']['fixed_size']
+    assert not protection_detail(saved,dict(code='51603',data=[]))['detail_available']
 
 
 @pytest.mark.parametrize('field,value,label', [('ordId','99','order_identity'),('ts','1800000001000','bill_timestamp_before_fill'),

@@ -1,7 +1,8 @@
-"""Explicit GET-only manual-test settlement. No entry arming or order transport.
+"""Explicit GET-only reviewed-test settlement. No entry arming or order transport.
 
 Archives the supported single test atomically with original fills, bills, cash
-baseline and risk close. It never reports manual closure as an automatic exit.
+baseline and risk close. Separately labels manual and tracked automatic exits;
+neither a manual close nor a reduction alone verifies native TP/SL protection.
 """
 import asyncio
 from copy import deepcopy
@@ -83,9 +84,10 @@ class ManualTestLifecycle(DemoCycleLifecycle):
             settlement=dict(client_id=client,net_usdt=report['cash_change_usdt'],funding_usdt='0',
                 cash_before_usdt=saved['cash'],cash_after_usdt=money(snapshot['cash_balance_usdt']),
                 bill_ids=sorted(rows,key=int),closed_at_ms=closed,reconciled_through_ms=through,
-                closure_source='manual_test_close',automatic_exit_verified=False,strategy_performance_sample=False,
+                closure_source='tracked_emergency_exit' if report['automatic_exit_verified'] else 'manual_test_close',
+                automatic_exit_verified=report['automatic_exit_verified'],test_roundtrip_verified=False,strategy_performance_sample=False,
                 account_bills_audited=True,funding_audited=True,new_entry_allowed=False,submission_enabled=False,
-                manual_evidence=dict(entry=entry,closing=closing,report=report,snapshot=snapshot,bills=bills))
+                close_evidence=dict(entry=entry,closing=closing,report=report,snapshot=snapshot,bills=bills,reduction_record=saved.get('reduction')))
             trade=dict(settlement,entry_order_id=saved['order_id'],child_order_id=closing['ordId'],
                 symbol=saved['body']['instId'],fill_ids=sorted(active))
             self.db.execute('INSERT INTO demo_closed_trade VALUES(?,?,?)',(client,closing['ordId'],encoded(trade)))
@@ -94,9 +96,9 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 closed_at_ms=closed,audit_verified=True)
             result=self._archive_settled_in_transaction(snapshot,bills,now,settlement,state)
             self.db.execute('COMMIT')
-            return dict(phase='manual_test_closed_and_archived',sequence=result['sequence'],
+            return dict(phase='tracked_test_exit_closed_and_archived' if report['automatic_exit_verified'] else 'manual_test_closed_and_archived',sequence=result['sequence'],
                 ledger_archived=True,daily_risk_preserved=True,new_entry_allowed=False,
-                automatic_exit_verified=False,orders_sent=0,net_usdt=settlement['net_usdt'])
+                automatic_exit_verified=report['automatic_exit_verified'],test_roundtrip_verified=False,orders_sent=0,net_usdt=settlement['net_usdt'])
         except Exception:
             self.db.execute('ROLLBACK')
             raise
