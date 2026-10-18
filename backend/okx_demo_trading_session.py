@@ -16,9 +16,11 @@ from okx_demo_bill_reader import DemoBillReader
 from okx_demo_cycles import DemoCycleLifecycle,unresolved_emergency_exit
 from okx_demo_executor import receipt
 from okx_demo_protection import assess_recovery
+from okx_demo_manual_review import protection_detail
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_trading_transport import OKXDemoTradingTransport
 from okx_demo_transport import DEMO_HEADERS
+from okx_demo_authority import day_key
 from okx_orders import ACTIVE, parse_order
 from okx_reconcile import number
 from okx_strategy_bridge import plan_strategy_signal,plan_execution_test
@@ -54,6 +56,8 @@ class DemoTradingSession:
             'status TEXT NOT NULL,exchange_order_id TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_trading_clock ('
             'entry_id TEXT PRIMARY KEY,dispatched_at INTEGER NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS demo_protection_trace ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,entry_id TEXT NOT NULL,observed_at INTEGER NOT NULL,body TEXT NOT NULL)')
 
     def armed(self):
         return (self.enabled is True and self.broker.enabled is True
@@ -106,7 +110,16 @@ class DemoTradingSession:
                     # The immutable archive sequence, never caller text or a random nonce.
                     frozen['test_cycle']=self.lifecycle.verify_archive_chain()[0]
                 candidate=planner(**frozen,now_ms=self._owner())
-                if not self.authority.allows(candidate): return outcome('entry_gate_blocked')
+                if not self.authority.allows(candidate):
+                    now=self._owner()
+                    daily=self.db.execute('SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(now),)).fetchone()
+                    if daily and (daily[1]>=3 or daily[2]):
+                        return outcome('entry_gate_blocked')|{'gate_reason':'daily_risk_halt','retry_after_seconds':0}
+                    if daily and daily[0]>=6:
+                        return outcome('entry_gate_blocked')|{'gate_reason':'daily_entry_limit','retry_after_seconds':0}
+                    if daily and now<daily[3]:
+                        return outcome('entry_gate_blocked')|{'gate_reason':'risk_cooldown','retry_after_seconds':(daily[3]-now+999)//1000}
+                    return outcome('entry_gate_blocked')|{'gate_reason':'account_or_plan_verification','retry_after_seconds':0}
                 client_id=self.journal.register(candidate['plan'])
                 self.journal.reserve_entry(client_id)
                 self.db.execute('INSERT INTO demo_trading_clock VALUES(?,?)',(client_id,self._owner()))
@@ -137,7 +150,7 @@ class DemoTradingSession:
                 raise
             except Exception:
                 self.halt()
-                return outcome('blocked_reconciliation_required')
+                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,'protection_diagnostics':dict(self.recovery_diagnostics)}
 
     async def recover(self,client_id,*,force_exit=False):
         if not self.armed(): return outcome('disabled')
@@ -209,7 +222,16 @@ class DemoTradingSession:
         plan,snapshot,entry,evidence,stamp=await self._evidence(client_id)
         self.recovery_stage='protection_assessment'
         assessment=assess_recovery(plan,evidence,now_ms=self._owner())
-        self.recovery_diagnostics=dict(assessment.get('diagnostics',{}))
+        self.recovery_diagnostics=dict(assessment.get('diagnostics',{}),assessment_reason=assessment['reason'],
+            pending_algo_count=len(snapshot['pending_algos']))
+        attached=plan['body']['attachAlgoOrds'][0]['attachAlgoClOrdId']
+        owned=[row for row in snapshot['pending_algos'] if row.get('algoClOrdId')==attached]
+        if len(owned)==1:
+            shape=protection_detail({'body':plan['body']},dict(code='0',data=owned))
+            shape.update(historical_only=False,live_protection_verified=assessment['protection_verified'])
+            self.recovery_diagnostics['pending_protection']=shape
+        self.db.execute('INSERT INTO demo_protection_trace(entry_id,observed_at,body) VALUES(?,?,?)',
+            (client_id,self._owner(),json.dumps(self.recovery_diagnostics,sort_keys=True)))
         if assessment['protection_verified']: self.recovery_protection_verified=True
         if assessment['reason']=='invalid_or_stale_evidence': raise ValueError('Invalid recovery evidence')
         if entry.state in ACTIVE:
@@ -237,10 +259,12 @@ class DemoTradingSession:
             if entry.state in ACTIVE: return outcome('cancel_unconfirmed_no_retry')
             assessment=assess_recovery(plan,evidence,now_ms=self._owner())
         if assessment['protection_verified'] and not force_exit:
+            self.recovery_stage='protection_fill_audit'
             proof=self.lifecycle.audit(snapshot)
             self.authority.accept_snapshot(proof)
             return outcome('native_protection_verified_monitor_required')
         self.halt()
+        self.recovery_stage='emergency_exit_validation'
         if assessment['reason']=='flat_requires_fill_audit':
             return outcome('flat_requires_settlement')
         # Reduction is allowed only for terminal, positively identified owned fills.
@@ -262,6 +286,7 @@ class DemoTradingSession:
         close=dict(instId=body['instId'],tdMode='isolated',posSide='net',
             side='sell' if direction==1 else 'buy',ordType='market',
             sz=format(entry.filled,'f'),clOrdId=exit_id,reduceOnly=True)
+        self.recovery_stage='exit_reservation'
         self.db.execute('BEGIN IMMEDIATE')
         try:
             now=self._owner()
@@ -276,6 +301,7 @@ class DemoTradingSession:
         except Exception:
             if self.db.in_transaction: self.db.execute('ROLLBACK')
             raise
+        self.recovery_stage='exit_submission'
         self._owner()
         try:
             response=await self.broker.reduce_position(close,dict(DEMO_HEADERS))
@@ -286,6 +312,7 @@ class DemoTradingSession:
         return outcome('exit_acknowledged_query_required' if order_id else 'exit_unknown_no_retry')
 
     async def _query_exit(self,record):
+        self.recovery_stage='exit_query'
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
         client_id,encoded,expected_id=record
         body=json.loads(encoded); start=self._owner()

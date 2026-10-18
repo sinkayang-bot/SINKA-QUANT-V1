@@ -5,10 +5,25 @@
 `--audit-trade` 也可核對程式自動減倉：減倉委託必須符合原有 durable reservation、
 原始 client ID、已知 exchange order ID（若有）、reduce-only 參數與完整帳務，
 才輸出 `automatic_exit_verified: true`、`closure_source: tracked_emergency_exit`。
-`test_roundtrip_verified` 仍為 false；自動減倉不等於原生止盈止損驗證成功。
+若沒有退出前的有效保護觀察，`test_roundtrip_verified` 仍為 false；
+自動減倉不等於原生止盈止損驗證成功。
 唯讀核對會另查兩次附掛策略單詳情，只輸出狀態、類型、缺失欄位與符合與否，
 不顯示委託 ID 或原始回應。詳情查不到不會推斷曾有保護；歷史詳情即使吻合，
 也不代表退出前已驗證為 live。這些查詢不下新單，不改帳本。
+
+目前執行流程會把每次保護判定、原始 pending 欄位符合與否和固定錯誤階段
+附加至 `demo_protection_trace`。只有同一筆委託確實觀察到 live、完整 OCO、
+所有參數符合且當次 assessment 通過，才可作為歷史 live 保護證據；查到
+已取消 OCO 的歷史詳情不能補做這個證明。追蹤紀錄不包含金鑰或原始錯誤訊息。
+
+一次性測試在已 dispatched 委託遇到暫時讀取／校驗失敗時，最多嘗試三次
+既有委託恢復，中間各等一秒，仍受 90 秒執行上限與原有五秒證據時效限制。
+不重送 POST、不重新抓訊號、不更換委託 ID；未知寫入仍不重試。
+最終 `test_attempts`、`cleanup_protection_diagnostics` 分開呈現保護判定、
+後續成交稽核及減倉階段，避免把下游失敗一律叫作「保護判定失敗」。
+當次確實觀察到保護且減倉確認 flat 才會通過進出場連線測試，帳務結案仍另驗證。
+15 分鐘風控冷卻期、三連虧停單及每日次數限制不變；冷卻阻擋明確回報
+`gate_reason: risk_cooldown` 與 `retry_after_seconds`，結案也回報剩餘秒數。
 
 若 `--close-reviewed-test` 辨識為程式既有減倉，其正式封存來源會記為
 `tracked_emergency_exit`，輸出 `tracked_test_exit_closed_and_archived`，並保存

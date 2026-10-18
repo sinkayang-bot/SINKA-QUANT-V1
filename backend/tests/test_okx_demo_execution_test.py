@@ -9,6 +9,7 @@ from okx_demo_trading_supervisor import DemoTradingSupervisor
 from okx_demo_trading_session import DemoTradingSession
 from okx_demo_trading_worker import execute
 from okx_strategy_bridge import plan_execution_test
+from okx_demo_manual_review import retained_in_transaction
 
 
 def execution_source():
@@ -43,6 +44,65 @@ class ExecutionModeTests(SupervisorTests):
         self.assertEqual(self.journal.db.execute('SELECT entries FROM demo_daily').fetchone()[0],1)
         self.assertIn('execution_test',self.journal.db.execute('SELECT plan FROM demo_intent').fetchone()[0])
         self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        retained=retained_in_transaction(self.journal.db,self.owner.scope)
+        self.assertEqual(retained['native_protection_observed_at_ms'],self.f.now)
+
+    async def test_transient_pending_metadata_recovers_same_order_without_second_entry(self):
+        self.enable(); original=self.session._evidence; calls=0
+        async def transient(client):
+            nonlocal calls
+            calls+=1
+            plan,snapshot,entry,evidence,stamp=await original(client)
+            if calls==1:
+                snapshot=deepcopy(snapshot); evidence=deepcopy(evidence)
+                snapshot['pending_algos'][0]['sz']=''
+                evidence['pending_algos']['rows'][0]['sz']=''
+            return plan,snapshot,entry,evidence,stamp
+        with patch.object(self.session,'_evidence',side_effect=transient):
+            result=await self.supervisor.run(arm_entries=True)
+        self.assertTrue(result['test_roundtrip_verified'])
+        self.assertEqual(len(result['test_attempts']),2)
+        self.assertEqual(result['test_attempts'][0]['protection_diagnostics']['missing_fields'],['sz'])
+        self.assertEqual(len(self.f.posts),2)
+        self.assertEqual(sum(not body.get('reduceOnly') for _,body in self.f.posts),1)
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_protection_trace').fetchone()[0],3)
+
+    async def test_protection_observation_survives_a_later_fill_audit_failure(self):
+        self.enable()
+        with patch.object(self.cycles,'audit',side_effect=ValueError('synthetic fill audit gap')):
+            result=await self.supervisor.run(arm_entries=True)
+        self.assertEqual(result['test_attempts'][0]['recovery_stage'],'protection_fill_audit')
+        self.assertTrue(result['protection_verified'])
+        self.assertTrue(result['flat_verified'])
+        self.assertEqual(result['phase'],'flat_requires_emergency_settlement_review')
+        self.assertFalse(result['automatic_runtime_ready'])
+        self.assertEqual(len(self.f.posts),2)
+
+    async def test_invalid_protection_rechecks_are_bounded_and_never_resubmit(self):
+        self.enable(); original=self.session._evidence
+        async def invalid(client):
+            plan,snapshot,entry,evidence,stamp=await original(client)
+            snapshot=deepcopy(snapshot); evidence=deepcopy(evidence)
+            snapshot['pending_algos'][0]['sz']=''
+            evidence['pending_algos']['rows'][0]['sz']=''
+            return plan,snapshot,entry,evidence,stamp
+        with patch.object(self.session,'_evidence',side_effect=invalid):
+            result=await self.supervisor.run(arm_entries=True)
+        self.assertEqual(len(result['test_attempts']),3)
+        self.assertFalse(result['test_roundtrip_verified'])
+        self.assertEqual(result['cleanup_protection_diagnostics']['missing_fields'],['sz'])
+        self.assertEqual(len(self.f.posts),1)
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_protection_trace').fetchone()[0],4)
+        self.assertNotIn('native_protection_observed_at_ms',retained_in_transaction(self.journal.db,self.owner.scope))
+
+    async def test_cooldown_is_explicit_and_cannot_be_bypassed_by_test_mode(self):
+        self.enable()
+        self.journal.db.execute('UPDATE demo_daily SET cooldown=?',(self.f.now+60000,))
+        result=await self.session.enter(execution_source(),execution_test=True)
+        self.assertEqual(result['phase'],'entry_gate_blocked')
+        self.assertEqual(result['gate_reason'],'risk_cooldown')
+        self.assertEqual(result['retry_after_seconds'],60)
+        self.assertEqual(self.f.posts,[])
 
     async def test_test_mode_cannot_take_over_a_normal_strategy_intent(self):
         await self.session.enter(args())

@@ -47,6 +47,17 @@ def retained_in_transaction(db,scope):
         reduction=db.execute('SELECT client_id,body,exchange_order_id FROM demo_emergency_exit WHERE entry_id=?',(client,)).fetchone()
         if reduction:
             result['reduction']=dict(client_id=reduction[0],body=json.loads(reduction[1]),order_id=reduction[2])
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_protection_trace'").fetchone():
+        proof=[]
+        for at,raw in db.execute('SELECT observed_at,body FROM demo_protection_trace WHERE entry_id=? ORDER BY id',(client,)):
+            observation=json.loads(raw); shape=observation.get('pending_protection',{})
+            matches=shape.get('matches',{})
+            if (observation.get('assessment_reason')=='open_position_protected' and observation.get('pending_algo_count')==1
+                    and shape.get('historical_only') is False and shape.get('live_protection_verified') is True
+                    and shape.get('state')=='live' and shape.get('order_type')=='oco'
+                    and matches and all(v is True for v in matches.values())):
+                proof.append(at)
+        if proof: result['native_protection_observed_at_ms']=proof[0]
     return result
 
 
@@ -144,6 +155,8 @@ def assess(saved, bundle, entry, closing):
             and Decimal(money(closing.get('sz')))==Decimal(money(expected.get('sz'))))
     report['closure_source']='tracked_emergency_exit' if tracked else 'manual_or_untracked_close'
     report['automatic_exit_verified']=tracked and report['evidence_matches']
+    report['native_protection_verified']=type(saved.get('native_protection_observed_at_ms')) is int and report['evidence_matches']
+    report['test_roundtrip_verified']=report['automatic_exit_verified'] and report['native_protection_verified']
     if tracked:
         report['phase']='tracked_exit_evidence_matches' if report['evidence_matches'] else 'tracked_exit_review_required'
     return report

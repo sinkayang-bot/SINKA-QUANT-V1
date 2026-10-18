@@ -10,7 +10,7 @@ from decimal import Decimal, localcontext
 import json
 import time
 
-from okx_demo_authority import DemoEntryAuthority
+from okx_demo_authority import DemoEntryAuthority,day_key
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_close_audit import spec_digest
 from okx_demo_cycles import DemoCycleLifecycle
@@ -85,7 +85,8 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 cash_before_usdt=saved['cash'],cash_after_usdt=money(snapshot['cash_balance_usdt']),
                 bill_ids=sorted(rows,key=int),closed_at_ms=closed,reconciled_through_ms=through,
                 closure_source='tracked_emergency_exit' if report['automatic_exit_verified'] else 'manual_test_close',
-                automatic_exit_verified=report['automatic_exit_verified'],test_roundtrip_verified=False,strategy_performance_sample=False,
+                automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
+                test_roundtrip_verified=report['test_roundtrip_verified'],strategy_performance_sample=False,
                 account_bills_audited=True,funding_audited=True,new_entry_allowed=False,submission_enabled=False,
                 close_evidence=dict(entry=entry,closing=closing,report=report,snapshot=snapshot,bills=bills,reduction_record=saved.get('reduction')))
             trade=dict(settlement,entry_order_id=saved['order_id'],child_order_id=closing['ordId'],
@@ -95,10 +96,15 @@ class ManualTestLifecycle(DemoCycleLifecycle):
             self.authority._record_close_in_transaction('settled:'+client,pnl_usdt=settlement['net_usdt'],
                 closed_at_ms=closed,audit_verified=True)
             result=self._archive_settled_in_transaction(snapshot,bills,now,settlement,state)
+            finished=self.authority._now()
+            daily=self.db.execute('SELECT loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(finished),)).fetchone()
+            cooldown=max(0,daily[2]-finished+999)//1000
             self.db.execute('COMMIT')
             return dict(phase='tracked_test_exit_closed_and_archived' if report['automatic_exit_verified'] else 'manual_test_closed_and_archived',sequence=result['sequence'],
                 ledger_archived=True,daily_risk_preserved=True,new_entry_allowed=False,
-                automatic_exit_verified=report['automatic_exit_verified'],test_roundtrip_verified=False,orders_sent=0,net_usdt=settlement['net_usdt'])
+                cooldown_remaining_seconds=cooldown,risk_halted=bool(daily[0]>=3 or daily[1]),
+                automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
+                test_roundtrip_verified=report['test_roundtrip_verified'],orders_sent=0,net_usdt=settlement['net_usdt'])
         except Exception:
             self.db.execute('ROLLBACK')
             raise

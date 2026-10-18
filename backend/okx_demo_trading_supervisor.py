@@ -166,11 +166,26 @@ class DemoTradingSupervisor:
             # Recovery after restart never implicitly clears a takeover kill switch.
             reason='runtime_limit'
             test_protection=False
+            test_attempts=[]
             while not self.stop_event.is_set() and loop.time()<deadline:
                 result=await self.tick()
                 if on_status is not None: on_status(deepcopy(result))
                 if self.execution_test:
-                    test_protection=result['phase']=='native_protection_verified_monitor_required'
+                    test_protection=(result['phase']=='native_protection_verified_monitor_required'
+                        or self.session.recovery_protection_verified)
+                    test_attempts.append(dict(phase=result['phase'],recovery_stage=self.session.recovery_stage,
+                        protection_diagnostics=dict(self.session.recovery_diagnostics),
+                        **{k:result[k] for k in ('gate_reason','retry_after_seconds') if k in result}))
+                    active=self.session.db.execute('SELECT id,dispatched FROM demo_intent').fetchone()
+                    if (not test_protection and result['phase']=='blocked_reconciliation_required'
+                            and active is not None and active[1]==1 and len(test_attempts)<3
+                            and not self.session.db.execute('SELECT 1 FROM demo_emergency_exit WHERE entry_id=?',(active[0],)).fetchone()
+                            and loop.time()+6<deadline):
+                        # Only GET-based recovery of the existing dispatched ID.
+                        # No second session.enter call, new signal or POST retry.
+                        try: await asyncio.wait_for(self.stop_event.wait(),timeout=1)
+                        except TimeoutError: pass
+                        continue
                     reason='execution_test_cycle'
                     break
                 if result['phase'] not in {'waiting_for_signal','entry_gate_blocked','cycle_archived',
@@ -184,9 +199,11 @@ class DemoTradingSupervisor:
             final=(await self._cleanup())|{'stop_reason':reason}
             if self.execution_test:
                 flat=final['phase']=='flat_requires_emergency_settlement_review'
+                test_protection=test_protection or self.session.recovery_protection_verified
                 final.update(execution_test=True,protection_verified=test_protection,
                     test_roundtrip_verified=test_protection and flat,
-                    flat_verified=flat,strategy_performance_sample=False)
+                    flat_verified=flat,strategy_performance_sample=False,test_attempts=test_attempts)
+                final['cleanup_protection_diagnostics']=dict(self.session.recovery_diagnostics)
                 final.update(self.session.execution_test_diagnostics)
             return final
         except asyncio.CancelledError:
