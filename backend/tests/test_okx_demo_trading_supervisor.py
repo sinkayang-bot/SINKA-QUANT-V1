@@ -160,6 +160,37 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_block_reason_and_symbol_changes_print_and_survive_later_waiting(self):
+        import io
+        from contextlib import redirect_stdout
+        stream=io.StringIO(); reporter=DemoProgress(True)
+        with redirect_stdout(stream):
+            for reason,symbol in [('daily_risk_halt','LTC-USDT-SWAP'),
+                    ('risk_cooldown','LTC-USDT-SWAP'),('risk_cooldown','ETH-USDT-SWAP')]:
+                reporter(dict(phase='entry_gate_blocked',gate_reason=reason,
+                    retry_after_seconds=60,selected_symbol=symbol))
+            reporter({'phase':'waiting_for_signal'})
+        rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual([r['ticks'] for r in rows],[1,2,3,4])
+        self.assertEqual(rows[0]['gate_reason'],'daily_risk_halt')
+        self.assertEqual(reporter.gate_counts,{'daily_risk_halt':1,'risk_cooldown':2})
+        self.assertEqual(reporter.last_entry_block,dict(gate_reason='risk_cooldown',
+            retry_after_seconds=60,selected_symbol='ETH-USDT-SWAP',ticks=3))
+        self.assertNotIn('gate_reason',rows[-1])
+
+    def test_block_diagnostics_filter_unknown_text_and_invalid_waits(self):
+        import io
+        from contextlib import redirect_stdout
+        for retry in (True,-1,86401,'private-value',None):
+            with self.subTest(retry=retry):
+                stream=io.StringIO(); reporter=DemoProgress(True)
+                with redirect_stdout(stream):
+                    reporter(dict(phase='entry_gate_blocked',gate_reason='private-value',
+                        selected_symbol='private-value',retry_after_seconds=retry,uid='private-value'))
+                self.assertEqual(reporter.last_entry_block,dict(gate_reason='unspecified',ticks=1))
+                self.assertNotIn('private-value',stream.getvalue())
+                self.assertNotIn('retry_after_seconds',stream.getvalue())
+
     def test_filters_details_and_throttles_unchanged_status(self):
         import io
         from contextlib import redirect_stdout

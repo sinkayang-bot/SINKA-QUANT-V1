@@ -29,6 +29,8 @@ REQUIRED=('OKX_API_KEY','OKX_API_SECRET','OKX_API_PASSPHRASE','OKX_EXPECTED_UID'
 
 class DemoProgress:
     """Report fixed labels only; never serialize account or upstream data."""
+    GATE_REASONS=frozenset({'daily_risk_halt','daily_entry_limit','risk_cooldown',
+        'account_or_plan_verification'})
     PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
         'native_protection_verified_monitor_required','kill_switch_active',
         'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
@@ -39,16 +41,30 @@ class DemoProgress:
     def __init__(self,enabled=False):
         self.enabled=enabled
         self.counts={}
+        self.gate_counts={}
+        self.last_entry_block=None
         self.previous=None
 
     def __call__(self,result):
         phase=result.get('phase')
         if phase not in self.PHASES: phase='other_status'
         self.counts[phase]=self.counts.get(phase,0)+1
-        if self.enabled and (phase!=self.previous or sum(self.counts.values())%6==0):
+        gate={}
+        if phase=='entry_gate_blocked':
+            reason=result.get('gate_reason')
+            if not isinstance(reason,str) or reason not in self.GATE_REASONS: reason='unspecified'
+            gate['gate_reason']=reason
+            retry=result.get('retry_after_seconds')
+            if type(retry) is int and 0<=retry<=86400: gate['retry_after_seconds']=retry
+            self.gate_counts[reason]=self.gate_counts.get(reason,0)+1
+            self.last_entry_block=gate|{'ticks':sum(self.counts.values())}
+            if result.get('selected_symbol') in SYMBOLS:
+                self.last_entry_block['selected_symbol']=result['selected_symbol']
+        status_key=(phase,gate.get('gate_reason'),result.get('selected_symbol') if result.get('selected_symbol') in SYMBOLS else None)
+        if self.enabled and (status_key!=self.previous or sum(self.counts.values())%6==0):
             try:
                 payload={'mode':'demo_progress','phase':phase,
-                    'ticks':sum(self.counts.values()),'live_trading_enabled':False}
+                    'ticks':sum(self.counts.values()),'live_trading_enabled':False}|gate
                 scan=result.get('scan')
                 if isinstance(scan,dict):
                     payload['scan']={k:v for k,v in scan.items() if k in {
@@ -59,7 +75,7 @@ class DemoProgress:
                 print(json.dumps(payload,sort_keys=True,separators=(',',':')),flush=True)
             except OSError:
                 pass
-        self.previous=phase
+        self.previous=status_key
 
 
 async def run_supervisor(supervisor,env):
@@ -70,7 +86,8 @@ async def run_supervisor(supervisor,env):
             loop.add_signal_handler(signum,supervisor.stop); installed.append(signum)
         result=await supervisor.run(initialize_baseline=env.get('DEMO_INITIALIZE_BASELINE')=='1',
             arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',resume_idle=env.get('DEMO_RESUME_IDLE')=='1',on_status=progress)
-        return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values())}
+        return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values()),
+            'entry_gate_counts':dict(progress.gate_counts),'last_entry_block':progress.last_entry_block}
     finally:
         for signum in installed: loop.remove_signal_handler(signum)
 

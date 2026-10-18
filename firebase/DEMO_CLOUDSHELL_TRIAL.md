@@ -159,6 +159,14 @@ output includes `tick_counts` and `ticks_observed`. These count supervisor resul
 not orders or fills. No account fields, raw upstream messages or credentials are
 printed. A broken progress output stream does not interrupt recovery.
 
+Entry blocks report an allowlisted `gate_reason`: `daily_risk_halt`,
+`daily_entry_limit`, `risk_cooldown`, or `account_or_plan_verification`.
+Unknown reasons become `unspecified`; bounded `retry_after_seconds` is included
+when valid. A reason or selected-market change prints immediately. The final
+worker summary retains `entry_gate_counts` and `last_entry_block` (including
+the scan tick and allowlisted symbol) even after later waiting ticks. These
+diagnostics do not change risk limits, admission checks or order submission.
+
 Normal idle monitoring still requires audit continuity within 60 seconds.
 Explicit `--resume-idle` permits GET-only reconciliation of a never-traded first
 cycle whose ORIGINAL baseline is at most 12 hours old. That case requires no entry
