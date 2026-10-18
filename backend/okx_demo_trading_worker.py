@@ -60,7 +60,7 @@ async def run_supervisor(supervisor,env):
         for signum in (signal.SIGINT,signal.SIGTERM):
             loop.add_signal_handler(signum,supervisor.stop); installed.append(signum)
         result=await supervisor.run(initialize_baseline=env.get('DEMO_INITIALIZE_BASELINE')=='1',
-            arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',on_status=progress)
+            arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',resume_idle=env.get('DEMO_RESUME_IDLE')=='1',on_status=progress)
         return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values())}
     finally:
         for signum in installed: loop.remove_signal_handler(signum)

@@ -174,6 +174,7 @@ class CycleTests(unittest.TestCase):
         self.roll(); self.t.now+=60001; self.t.authority.acquire()
         raw,bills=self.idle()
         with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills)
+        with self.assertRaises(DemoFillAuditError): self.cycles.audit_idle(raw,bills,resume_idle=True)
         self.assertEqual(self.t.journal.db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0],self.boundary)
 
     def test_double_archive_attempt_cannot_erase_history_or_duplicate_risk(self):

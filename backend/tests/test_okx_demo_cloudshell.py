@@ -236,3 +236,20 @@ def test_paused_order_still_prevents_first_account_binding(monkeypatch):
     monkeypatch.setattr(setup,'OKXDemoReadTransport',lambda creds,**opts:fixture.reader().transport)
     with pytest.raises(setup.SetupBlocked,match='first_binding_requires_flat_clean_account'):
         asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
+
+
+def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsys):
+    captured={}
+    monkeypatch.setattr(setup,'persistent_storage',lambda path:None)
+    monkeypatch.setattr(setup,'credentials',lambda:DemoCredentials('synthetic','synthetic','synthetic'))
+    monkeypatch.setattr(setup,'prepare',lambda *a,**k:({'account_scope':'scope','uid':'123'},True))
+    monkeypatch.setattr(setup,'command',lambda args:'v24.21.0')
+    def execute(env):
+        captured.update(env)
+        return {'phase':'stopped_no_active_intent'},0
+    monkeypatch.setattr(setup,'execute',execute)
+    assert setup.main(['--run','--resume-idle','--seconds','900'])==0
+    assert captured['DEMO_RESUME_IDLE']=='1'
+    assert captured['DEMO_INITIALIZE_BASELINE']=='0'
+    assert captured['DEMO_PROGRESS']=='1'
+    assert 'synthetic' not in capsys.readouterr().out

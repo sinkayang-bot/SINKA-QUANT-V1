@@ -31,6 +31,8 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_cycle_state ('
             'singleton INTEGER PRIMARY KEY CHECK(singleton=1),sequence INTEGER NOT NULL,previous_hash TEXT NOT NULL,started_at INTEGER NOT NULL)')
         self.db.execute("INSERT OR IGNORE INTO demo_cycle_state VALUES(1,0,'',0)")
+        self.db.execute('CREATE TABLE IF NOT EXISTS demo_idle_resume ('
+            'revision INTEGER PRIMARY KEY,body TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_cycle_entry_receipt ('
             'singleton INTEGER PRIMARY KEY CHECK(singleton=1),sequence INTEGER NOT NULL,epoch INTEGER NOT NULL,session TEXT NOT NULL,snapshot_hash TEXT NOT NULL)')
 
@@ -109,7 +111,22 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
         except Exception:
             raise DemoFillAuditError('Cycle not advanced; prior ledger retained and entry blocked') from None
 
-    def audit_idle(self,snapshot,bills):
+    def _untouched_gap(self,meta,state,now):
+        # Narrow recovery: only a never-traded first cycle, within 12 hours of
+        # its ORIGINAL baseline. Full immutable fill and two bill scans below
+        # still apply. Neither the baseline nor the risk ledger is reset.
+        if (state!=(0,'',0) or not 0<=now-meta[0]<=43200000
+                or not MAX_AUDIT_GAP_MS<now-meta[1]<=43200000):
+            raise ValueError('Untouched bounded first cycle required')
+        for table in ('demo_intent','demo_execution','demo_risk_entry','demo_risk_close',
+                'demo_cycle_archive','demo_closed_trade','demo_trade_settlement','demo_account_bill'):
+            if self.db.execute('SELECT 1 FROM '+table).fetchone():
+                raise ValueError('Trading history requires separate reconciliation')
+        emergency=self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_emergency_exit'").fetchone()
+        if emergency and self.db.execute('SELECT 1 FROM demo_emergency_exit').fetchone():
+            raise ValueError('Emergency settlement required')
+
+    def audit_idle(self,snapshot,bills,*,resume_idle=False):
         """Renew readiness only with empty current-cycle bills and unchanged cash."""
         try:
             now=self._begin_attempt()
@@ -119,9 +136,15 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
                 state=self.verify_archive_chain()
                 meta=self.db.execute('SELECT baseline_at,last_checked,anchor,revision FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
                 cash=self.db.execute('SELECT cash FROM demo_cash_baseline WHERE singleton=1').fetchone()
+                if type(resume_idle) is not bool:
+                    raise ValueError('Explicit boolean resume choice required')
                 if (meta is None or cash is None or self.db.execute('SELECT 1 FROM demo_intent').fetchone()
-                        or not 0<=now-meta[1]<=MAX_AUDIT_GAP_MS or (meta[2] is not None and meta[2] not in fills)):
-                    raise ValueError('Current continuous idle cycle required')
+                        or now<meta[1] or (meta[2] is not None and meta[2] not in fills)):
+                    raise ValueError('Current idle cycle required')
+                gap=now-meta[1]>MAX_AUDIT_GAP_MS
+                if gap:
+                    if not resume_idle: raise ValueError('Continuous audit or explicit recovery required')
+                    self._untouched_gap(meta,state,now)
                 if snapshot['pending_orders'] or snapshot['pending_algos'] or any(Decimal(p['pos'])!=0 for p in snapshot['positions']):
                     raise ValueError('Account must stay flat and clean')
                 for identity,fill in fills.items():
@@ -138,6 +161,11 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
                         or money(snapshot.get('cash_balance_usdt'))!=cash[0]):
                     raise ValueError('Idle cash/bill changes require reconciliation')
                 finished=self.authority._now(); self.authority._owner(finished); self._snapshot(snapshot,finished)
+                if gap:
+                    self.db.execute('INSERT INTO demo_idle_resume VALUES(?,?)',(meta[3]+1,encoded(dict(
+                        version=1,baseline_at=meta[0],previous_checked_at=meta[1],verified_through_ms=snapshot['received_at_ms'],
+                        verified_at=finished,epoch=self.authority.epoch,revision=meta[3]+1,
+                        snapshot_hash=snapshot_digest(snapshot),bill_evidence_hash=digest(bills)))))
                 self.db.execute('UPDATE demo_fill_audit_meta SET last_checked=?,revision=? WHERE singleton=1',(finished,meta[3]+1))
                 verified=self._certify(snapshot,finished,meta[3]+1)
                 self._entry_receipt(verified,state[0])

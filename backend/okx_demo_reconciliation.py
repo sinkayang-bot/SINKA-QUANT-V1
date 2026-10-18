@@ -65,7 +65,7 @@ class DemoReconciliationRunner:
         try: self.lifecycle._begin_attempt()
         except Exception: pass
 
-    async def run_once(self,*,initialize_baseline=False):
+    async def run_once(self,*,initialize_baseline=False,resume_idle=False):
         if not self.enabled:
             self.last_result=status('disabled'); return deepcopy(self.last_result)
         if self.lock.locked(): return status('busy')
@@ -88,7 +88,7 @@ class DemoReconciliationRunner:
                 rows=self.db.execute('SELECT id,plan,dispatched FROM demo_intent').fetchall()
                 if not rows:
                     bundle=await self.bill_reader.collect(begin_ms=baseline[0])
-                    proof=self.lifecycle.audit_idle(bundle['snapshot'],bundle['bills'])
+                    proof=self.lifecycle.audit_idle(bundle['snapshot'],bundle['bills'],resume_idle=resume_idle)
                     self.authority.accept_snapshot(proof)
                     self.last_result=status('idle_verified',sequence=self.lifecycle.verify_archive_chain()[0])
                 elif len(rows)!=1:

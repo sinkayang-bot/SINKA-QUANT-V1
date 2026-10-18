@@ -74,10 +74,10 @@ class DemoTradingSupervisor:
         source['started_at_ms']=self.started_at
         return await self.session.enter(source)
 
-    async def run(self,*,initialize_baseline=False,arm_entries=False,on_status=None):
+    async def run(self,*,initialize_baseline=False,arm_entries=False,resume_idle=False,on_status=None):
         if not self.enabled or not self.session.armed(): return outcome('disabled')
         if self.started_at is not None: return outcome('supervisor_already_started')
-        if type(initialize_baseline) is not bool or type(arm_entries) is not bool:
+        if any(type(value) is not bool for value in (initialize_baseline,arm_entries,resume_idle)):
             raise ValueError('Explicit boolean startup choices required')
         owner=self.session.authority
         loop=asyncio.get_running_loop(); deadline=loop.time()+self.max_seconds
@@ -86,7 +86,7 @@ class DemoTradingSupervisor:
         try:
             active=self.session.db.execute('SELECT 1 FROM demo_intent').fetchone()
             if active is None:
-                initial=await self.reconciliation.run_once(initialize_baseline=initialize_baseline)
+                initial=await self.reconciliation.run_once(initialize_baseline=initialize_baseline,resume_idle=resume_idle)
                 if initial['phase'] not in {'baseline_initialized','idle_verified'}:
                     return initial
                 if not arm_entries: return outcome('verified_but_not_armed')

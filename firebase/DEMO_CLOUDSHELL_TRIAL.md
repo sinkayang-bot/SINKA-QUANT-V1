@@ -96,8 +96,27 @@ output includes `tick_counts` and `ticks_observed`. These count supervisor resul
 not orders or fills. No account fields, raw upstream messages or credentials are
 printed. A broken progress output stream does not interrupt recovery.
 
-An idle ledger currently requires audit continuity within 60 seconds. A stopped
-trial resumed after that interval can fail reconciliation even when the account
-looks flat. Do not delete the ledger, change audit timestamps, initialize another
-baseline, or relax this check to resume. Full gap reconciliation remains required
-before a later trial; this progress update does not implement that reconciliation.
+Normal idle monitoring still requires audit continuity within 60 seconds.
+Explicit `--resume-idle` permits GET-only reconciliation of a never-traded first
+cycle whose ORIGINAL baseline is at most 12 hours old. It requires no entry
+reservations, execution history, closes, archives or emergency exits; current
+account snapshots must be stable, flat and free of orders/algos, recent fills
+must exactly match known baseline fills with the original anchor retained,
+both complete USDT bill scans from the original baseline must be empty, and
+cash must be unchanged. Any failed evidence blocks entries.
+
+A successful recovery atomically appends a hashed-evidence receipt to
+`demo_idle_resume` and refreshes the audit checkpoint in the current lease;
+it does not change the baseline, risk counters, account binding or kill switch.
+The trading supervisor separately requires explicit entry arming. This does not
+recover ledgers with prior trading or baselines older than 12 hours.
+Never delete the ledger, edit audit timestamps or initialize a second baseline.
+
+After a no-order first trial, resume using the same pinned binding and ledger:
+
+```bash
+"$HOME/sinka-demo-venv/bin/python" "$SINKA_SETUP_DIR/backend/okx_demo_cloudshell.py" --run --resume-idle --seconds 900
+```
+
+This is a bounded **demo-order-enabled** trial, not a 24/7 deployment. It may
+place simulated orders when a new strategy signal and all gates pass.

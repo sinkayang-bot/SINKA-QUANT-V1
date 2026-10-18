@@ -58,6 +58,20 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['tick_counts'],{'waiting_for_signal':result['ticks_observed']})
         self.assertEqual(self.f.posts,[])
 
+    async def test_explicit_first_trial_resume_reaches_signal_source_without_order(self):
+        self.f.now+=7200000
+        async def source(symbol,started):
+            self.sources.append((symbol,started))
+            self.supervisor.stop()
+            return None
+        self.supervisor.source=source
+        result=await self.supervisor.run(resume_idle=True,arm_entries=True)
+        self.assertEqual(result['stop_reason'],'stop_requested')
+        self.assertEqual(len(self.sources),1)
+        self.assertEqual(self.f.posts,[])
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_idle_resume').fetchone()[0],1)
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+
     async def test_stop_existing_protected_position_reduces_and_confirms_flat(self):
         await self.session.enter(args())
         result=await self.supervisor.run(on_status=lambda r:self.supervisor.stop())
