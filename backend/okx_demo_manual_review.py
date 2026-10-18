@@ -80,20 +80,31 @@ def assess(saved, bundle, entry, closing):
         and Decimal(money(closing.get('sz')))==qty and Decimal(money(closing.get('accFillSz')))==qty)
     rows=scan(evidence['passes'][0],saved['begin'],through)
     if rows!=scan(evidence['passes'][1],saved['begin'],through): raise ValueError('Bill passes changed')
-    seen=set(); match=True
+    seen=set(); mismatches={}
+    def mismatch(label):
+        mismatches[label]=mismatches.get(label,0)+1
     with localcontext() as context:
         context.prec=512
         movement=Decimal(0)
         for row in rows.values():
             identity=row['instId']+':'+row['tradeId']; fill=active.get(identity)
             direction='buy' if row['subType'] in {'1','3','6'} else 'sell'
-            if (fill is None or identity in seen or row['type']!='2' or row['subType'] not in {'1','2','3','4','5','6'}
-                    or row['ordId']!=fill['ordId'] or direction!=fill['side'] or int(row['ts'])<int(fill['fillTime'])
-                    or any(Decimal(row[k])!=Decimal(fill[v]) for k,v in [('sz','fillSz'),('px','fillPx'),('fee','fee'),('pnl','fillPnl')])
-                    or Decimal(row['balChg'])!=Decimal(row['pnl'])+Decimal(row['fee'])):
-                match=False
+            if fill is None: mismatch('bill_without_matching_fill')
+            if identity in seen: mismatch('duplicate_trade_bill')
+            if row['type']!='2': mismatch('unsupported_bill_type')
+            if row['subType'] not in {'1','2','3','4','5','6'}: mismatch('unsupported_bill_subtype')
+            if fill is not None:
+                if row['ordId']!=fill['ordId']: mismatch('order_identity')
+                if direction!=fill['side']: mismatch('side')
+                if int(row['ts'])<int(fill['fillTime']): mismatch('bill_timestamp_before_fill')
+                for field,other in [('sz','fillSz'),('px','fillPx'),('fee','fee'),('pnl','fillPnl')]:
+                    if Decimal(row[field])!=Decimal(fill[other]): mismatch(field)
+            if Decimal(row['balChg'])!=Decimal(row['pnl'])+Decimal(row['fee']): mismatch('balance_change_equation')
             seen.add(identity); movement+=Decimal(row['balChg'])
-        checks['all_bills_match_fills']=match and bool(active) and seen==set(active)
+        if set(active)-seen: mismatches['fills_without_bill']=len(set(active)-seen)
+        if not active: mismatch('no_trade_fills')
+        checks['all_bills_match_fills']=not mismatches
+        report['bill_fill_mismatches']=mismatches
         cash_delta=Decimal(money(snap['cash_balance_usdt']))-Decimal(saved['cash'])
         checks['cash_matches_bills']=cash_delta==movement
         report.update(fill_count=len(active),bill_count=len(rows),

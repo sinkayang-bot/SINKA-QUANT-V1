@@ -33,6 +33,19 @@ def test_matching_manual_close_preserves_automatic_exit_failure():
     assert result['cash_change_usdt']=='0.8'
     assert result['automatic_exit_verified'] is False
     assert result['new_entry_allowed'] is False and result['ledger_changed'] is False
+    assert result['bill_fill_mismatches']=={}
+
+
+@pytest.mark.parametrize('field,value,label', [('ordId','99','order_identity'),('ts','1800000001000','bill_timestamp_before_fill'),
+    ('sz','0.5','sz'),('px','101','px'),('fee','-0.2','fee'),('pnl','2','pnl'),('subType','1','side'),('tradeId','99','bill_without_matching_fill')])
+def test_bill_difference_reports_fixed_field_without_exposing_identifiers(field,value,label):
+    saved,bundle,entry,close=fixture()
+    for pages in bundle['bills']['passes']: pages[0]['data'][0][field]=value
+    report=assess(saved,bundle,entry,close)
+    assert report['bill_fill_mismatches'][label]==1
+    assert not report['evidence_matches']
+    assert not report['new_entry_allowed']
+    assert saved['client'] not in json.dumps(report)
 
 
 @pytest.mark.parametrize('change', ['cash','missing_fill','foreign_bill','not_reduce_only','position','partial','entry_identity','changed_pass'])
