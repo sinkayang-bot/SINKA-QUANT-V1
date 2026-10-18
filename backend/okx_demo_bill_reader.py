@@ -9,10 +9,12 @@ from okx_demo_reads import bill_route
 from okx_demo_settlement import bill, scan
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_strategy_bridge import timestamp
+from okx_demo_read_errors import failure_kind
 
 
 class DemoBillReadError(RuntimeError):
-    pass
+    def __init__(self,message,*,stage='unknown',kind='unavailable',snapshot_stage='unknown'):
+        super().__init__(message);self.stage=stage;self.kind=kind;self.snapshot_stage=snapshot_stage
 
 
 class DemoBillReader:
@@ -45,6 +47,7 @@ class DemoBillReader:
 
     async def collect(self, *, begin_ms):
         self.last_bundle=None
+        stage='bill_window'
         try:
             start=timestamp(self.reader.clock())
             bill_route(begin_ms,start)
@@ -52,11 +55,16 @@ class DemoBillReader:
                 raise ValueError('Bill baseline outside recent endpoint retention')
             async with asyncio.timeout(5):
                 # Account UID/config is verified before bill or amount reads.
+                stage='snapshot_before'
                 before=await self.reader.collect()
                 through=before['received_at_ms']
+                stage='bills_first_pass'
                 first=await self._pages(begin_ms,through)
+                stage='bills_second_pass'
                 second=await self._pages(begin_ms,through)
+                stage='snapshot_after'
                 after=await self.reader.collect()
+            stage='bill_consistency'
             now=timestamp(self.reader.clock())
             if not start<=through<=now or now-start>5000:
                 raise ValueError('Bill bundle expired or clock regressed')
@@ -77,6 +85,10 @@ class DemoBillReader:
         except asyncio.CancelledError:
             self.reader.last_snapshot=None
             raise
-        except Exception:
+        except Exception as error:
             self.reader.last_snapshot=None
-            raise DemoBillReadError('Demo bill window unavailable or inconsistent') from None
+            snapshot_stage=getattr(error,'stage','unknown')
+            if snapshot_stage not in {'snapshot_start','account_config','inventory_first_pass','inventory_second_pass','snapshot_consistency'}:
+                snapshot_stage='unknown'
+            raise DemoBillReadError('Demo bill window unavailable or inconsistent',stage=stage,
+                kind=failure_kind(error),snapshot_stage=snapshot_stage) from None

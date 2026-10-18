@@ -51,6 +51,22 @@ def test_strategy_close_mode_is_explicit_and_never_starts_order_worker(monkeypat
     assert result['orders_enabled'] is False and result['closure']['orders_sent']==0
 
 
+def test_trade_review_error_surfaces_safe_stage_not_exception_contents(monkeypatch,capsys):
+    import okx_demo_manual_review as review
+    from okx_demo_bill_reader import DemoBillReadError
+    monkeypatch.setattr(setup,'persistent_storage',lambda root:None)
+    monkeypatch.setattr(setup,'credentials',lambda:object())
+    monkeypatch.setattr(setup,'prepare',lambda *a,**k:({'account_scope':'scope'},True))
+    async def failed(*args):
+        raise review.TradeReviewBlocked('bill_bundle',DemoBillReadError('private-key',stage='snapshot_before',kind='timeout'))
+    monkeypatch.setattr(review,'audit_trade',failed)
+    assert setup.main(['--audit-trade'])==2
+    output=capsys.readouterr().out;result=json.loads(output)
+    assert result['read_diagnostics']['read_stage']=='snapshot_before'
+    assert result['read_diagnostics']['kind']=='timeout'
+    assert 'private-key' not in output
+
+
 def test_fixed_secret_versions_are_pinned_and_values_are_not_printed(monkeypatch):
     calls=[]
     def command(args):

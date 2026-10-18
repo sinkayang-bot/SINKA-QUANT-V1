@@ -1,5 +1,17 @@
 # Cloud Shell 人工限時驗收
 
+## 唯讀核對失敗的分層診斷
+
+`--audit-trade` 失敗時輸出 `read_diagnostics`，只包含固定階段與錯誤類型：
+retained ledger、bill bundle、entry／exit lookup、assessment，以及帳單內的
+snapshot before／first bill pass／second bill pass／snapshot after／consistency。
+快照本身另標示 config、first／second inventory pass 或 consistency。
+不輸出原始例外文字、帳號、委託 ID、API 金鑰或遠端訊息。
+僅對 timeout／transport failure／unavailable 的唯讀查詢最多重讀三次，
+每次仍重新取得完整五秒內帳單快照證據；不延長證據時效、不更新帳本時間。
+驗證不符或本機原帳本讀取失敗不重試。成功報告保留嘗試次數與先前固定錯誤標籤。
+非必要的歷史保護詳情查詢另限四秒，逾時只標記詳情不可用，不補造 live 保護證明。
+
 ## 交易所字串數值尾差
 
 成交／帳單逐筆對應、參數與每筆保證金等式仍完全比對；空倉到空倉的

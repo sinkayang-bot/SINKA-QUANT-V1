@@ -19,7 +19,8 @@ from okx_strategy_bridge import timestamp
 PENDING_ALGO_STATES=frozenset({'live','pause','partially_effective','partially_failed'})
 
 class DemoSnapshotError(RuntimeError):
-    pass
+    def __init__(self,message,*,stage='unknown',kind='unavailable'):
+        super().__init__(message);self.stage=stage;self.kind=kind
 
 
 def digits(value):
@@ -174,14 +175,19 @@ class DemoSnapshotReader:
 
     async def collect(self):
         self.last_snapshot = None
+        stage='snapshot_start'
         try:
             start = timestamp(self.clock())
             async with asyncio.timeout(5):
                 async with self.transport.read_session():
                     # Verify the configured account before reading any account amounts.
+                    stage='account_config'
                     config = self._config(await self._read("config"))
+                    stage='inventory_first_pass'
                     first = await self._pass(config)
+                    stage='inventory_second_pass'
                     second = await self._pass()
+            stage='snapshot_consistency'
             end = timestamp(self.clock())
             if self.recovery_only and (first['cash'] is None or second['cash'] is None):
                 raise ValueError('Recovery requires verified cash balance')
@@ -202,5 +208,6 @@ class DemoSnapshotReader:
             if self.recovery_only: snapshot['recovery_only']=True
             self.last_snapshot = deepcopy(snapshot)
             return snapshot
-        except Exception:
-            raise DemoSnapshotError("Demo account snapshot unavailable or inconsistent") from None
+        except Exception as error:
+            from okx_demo_read_errors import failure_kind
+            raise DemoSnapshotError("Demo account snapshot unavailable or inconsistent",stage=stage,kind=failure_kind(error)) from None

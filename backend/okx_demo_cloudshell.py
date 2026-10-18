@@ -301,9 +301,11 @@ def main(argv=None):
             result.update(phase=closed['phase'],closure=closed)
             code=0
         elif args.audit_trade:
-            from okx_demo_manual_review import audit_trade
+            from okx_demo_manual_review import audit_trade,TradeReviewBlocked
             try:
                 review=asyncio.run(audit_trade(root/'ledger.sqlite',binding,creds))
+            except TradeReviewBlocked as error:
+                raise SetupBlocked('manual_trade_'+error.stage+'_'+error.kind+'_ledger_preserved',diagnostics=error.diagnostics) from None
             except Exception:
                 raise SetupBlocked('manual_trade_evidence_unavailable_ledger_preserved') from None
             result.update(phase=review['phase'],review=review)
@@ -330,7 +332,8 @@ def main(argv=None):
             result.update(phase='trial_finished',worker=worker)
     except SetupBlocked as error:
         result.update(phase='blocked',reason=error.args[0]); code=2
-        if error.diagnostics is not None: result['algo_diagnostics']=error.diagnostics
+        if error.diagnostics is not None:
+            result['read_diagnostics' if args.audit_trade else 'algo_diagnostics']=error.diagnostics
     except KeyboardInterrupt:
         result.update(phase='interrupted_reconciliation_required'); code=130
     except Exception:

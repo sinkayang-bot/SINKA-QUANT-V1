@@ -18,6 +18,22 @@ from okx_demo_settlement import scan,cash_matches,CASH_ROUNDING_TOLERANCE
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
 from okx_demo_protection import _plan_body
+from okx_demo_read_errors import failure_kind
+
+
+class TradeReviewBlocked(RuntimeError):
+    def __init__(self,stage,error):
+        super().__init__('Trade review read failed')
+        if stage not in {'retained_ledger','reader_setup','bill_bundle','entry_lookup','exit_selection','exit_lookup','assessment','protection_detail'}:
+            stage='unknown'
+        self.stage=stage;self.kind=failure_kind(error)
+        self.diagnostics={'stage':stage,'kind':self.kind}
+        read_stage=getattr(error,'stage',None)
+        if isinstance(read_stage,str) and read_stage in {'bill_window','snapshot_before','bills_first_pass','bills_second_pass','snapshot_after','bill_consistency'}:
+            self.diagnostics['read_stage']=read_stage
+        snapshot_stage=getattr(error,'snapshot_stage',None)
+        if isinstance(snapshot_stage,str) and snapshot_stage in {'snapshot_start','account_config','inventory_first_pass','inventory_second_pass','snapshot_consistency'}:
+            self.diagnostics['snapshot_stage']=snapshot_stage
 
 
 def retained_test(path, scope,*,allow_strategy=False):
@@ -201,23 +217,52 @@ def protection_detail(saved,response):
     return result
 
 
-async def audit_trade(path, binding, creds):
-    saved=retained_test(path,binding['account_scope'],allow_strategy=True)
-    clock=lambda:int(time.time()*1000)
-    transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
-    reader=DemoSnapshotReader(transport,account_scope=binding['account_scope'],expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
-    async with asyncio.timeout(20):
-        bundle=await DemoBillReader(reader).collect(begin_ms=saved['begin'])
-        entry=order_row(await transport.lookup_entry(saved['body']['instId'],saved['client']))
-        exit_ids={f['ordId'] for f in bundle['snapshot']['recent_fills']
-                  if key(normalize_fill(f,bundle['bills']['through_ms'])) not in saved['baseline'] and f['ordId']!=saved['order_id']}
-        closing=order_row(await transport.lookup_child(saved['body']['instId'],next(iter(exit_ids)))) if len(exit_ids)==1 else None
-        report=assess(saved,bundle,entry,closing)
+async def _audit_trade_once(path,binding,creds):
+    stage='retained_ledger'
+    try:
+        saved=retained_test(path,binding['account_scope'],allow_strategy=True)
+        stage='reader_setup'
+        clock=lambda:int(time.time()*1000)
+        transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
+        reader=DemoSnapshotReader(transport,account_scope=binding['account_scope'],expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
+        async with asyncio.timeout(20):
+            stage='bill_bundle'
+            bundle=await DemoBillReader(reader).collect(begin_ms=saved['begin'])
+            stage='entry_lookup'
+            entry=order_row(await transport.lookup_entry(saved['body']['instId'],saved['client']))
+            stage='exit_selection'
+            exit_ids={f['ordId'] for f in bundle['snapshot']['recent_fills']
+                      if key(normalize_fill(f,bundle['bills']['through_ms'])) not in saved['baseline'] and f['ordId']!=saved['order_id']}
+            stage='exit_lookup'
+            closing=order_row(await transport.lookup_child(saved['body']['instId'],next(iter(exit_ids)))) if len(exit_ids)==1 else None
+            stage='assessment'
+            report=assess(saved,bundle,entry,closing)
+        # Optional historical shape cannot invalidate an already complete audit.
+        stage='protection_detail'
         try:
-            attached=saved['body']['attachAlgoOrds'][0]['attachAlgoClOrdId']
-            first=await transport.lookup_algo(attached)
-            second=await transport.lookup_algo(attached)
+            async with asyncio.timeout(4):
+                attached=saved['body']['attachAlgoOrds'][0]['attachAlgoClOrdId']
+                first=await transport.lookup_algo(attached)
+                second=await transport.lookup_algo(attached)
             report['protection_detail']=protection_detail(saved,first) if first==second else dict(detail_available=False,reason='detail_changed',historical_only=True,live_protection_verified=False)
         except Exception:
             report['protection_detail']=dict(detail_available=False,reason='detail_read_unavailable',historical_only=True,live_protection_verified=False)
         return report
+    except Exception as error:
+        raise TradeReviewBlocked(stage,error) from None
+
+
+async def audit_trade(path,binding,creds):
+    # Only read operations are retried. Fresh full evidence is required on each
+    # attempt; neither ledger timestamps nor the five-second window is extended.
+    failures=[]
+    for attempt in range(1,4):
+        try:
+            report=await _audit_trade_once(path,binding,creds)
+            return report|{'read_attempts':attempt,'prior_read_failures':failures}
+        except TradeReviewBlocked as error:
+            failures.append(dict(error.diagnostics))
+            if attempt==3 or error.stage=='retained_ledger' or error.kind not in {'timeout','transport_failure','unavailable'}:
+                error.diagnostics['read_attempts']=attempt
+                raise
+            await asyncio.sleep(1)
