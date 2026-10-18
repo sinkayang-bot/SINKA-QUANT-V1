@@ -164,3 +164,42 @@ actual OKX demo fills remain separate operator acceptance evidence.
 ```bash
 "$HOME/sinka-demo-venv/bin/python" "$SINKA_SETUP_DIR/backend/okx_demo_cloudshell.py" --run --resume-idle --scan-markets 20 --seconds 900
 ```
+
+### One-shot entry/exit acceptance through the SAME worker
+
+`--run --resume-idle --test-entry --seconds 90` explicitly opts into a single
+minimum-size BTC demo execution test without waiting for an SNR breakout. It
+uses the existing account binding, SQLite ledger, execution lease, daily risk
+budget, entry transport, native protection assessment and reduce-only shutdown.
+No separate account, key, strategy database, deployment or service is created.
+Do not run it alongside a scan trial; the shared lease prevents concurrent entry.
+
+The source is labelled `DEMO-EXECUTION-TEST-1`; its plan carries
+`purpose=execution_test`, and the stable account-scoped test identity is `once`.
+The fixed long BTC size is the smallest valid contract quantity. Extra admission
+caps: modelled notional <=50 USDT, margin <=min(10 USDT, 1% equity), modelled
+fee/slippage-inclusive loss <=min(1 USDT, 0.1% equity). Stop is tick-rounded
+approximately 1% below the quote and target exactly 2R. These are sizing models,
+not guaranteed market fill/loss limits. Existing exchange/account risk checks
+still apply. Both session and authority need explicit test admission; the
+default worker cannot force entry. A normal existing strategy intent is preserved.
+
+After the test entry result, the supervisor stops new entries and immediately
+uses the normal bounded shutdown/recovery path. One-shot entry and exit
+reservations survive crashes; unknown responses are queried, never resubmitted.
+`test_roundtrip_verified=true` requires BOTH verified native protection and
+filled tracked reduce-only exit with stable flat account and no pending orders
+or algos. It does not fire either price trigger, prove strategy profitability,
+or complete emergency fee/cash settlement. `flat_verified` refers to that
+tracked exit proof, not simply an acknowledgement.
+
+A successful test can return `flat_requires_emergency_settlement_review` with
+`test_roundtrip_verified=true` and exit code 0: connectivity/roundtrip passed,
+but strategy entry remains paused until the tracked emergency exit is settled.
+The original baseline is NOT reset and the test is not a strategy-performance
+sample. The actual account entry still counts against shared daily risk.
+Do not delete the ledger or repeat the test to bypass an unresolved result.
+
+```bash
+"$HOME/sinka-demo-venv/bin/python" "$SINKA_SETUP_DIR/backend/okx_demo_cloudshell.py" --run --resume-idle --test-entry --seconds 90
+```

@@ -128,3 +128,46 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
                     "modeled_loss_usdt": planned["modeled_loss_usdt"],
                     "binding_cap": min(caps, key=caps.get)},
                 "submission_enabled": False}
+
+TEST_VERSION = 'DEMO-EXECUTION-TEST-1'
+
+
+def plan_execution_test(*, account_scope, strategy_version, symbol, signal,
+                        quote, instrument, equity_usdt, available_usdt,
+                        now_ms, started_at_ms, instrument_received_at_ms,
+                        balance_received_at_ms, leverage=3, demo=False):
+    """One explicit minimum-size BTC demo connectivity test, not an SNR signal."""
+    if demo is not True or strategy_version!=TEST_VERSION or symbol!='BTC-USDT-SWAP' or signal is not None:
+        raise ValueError('Explicit fixed demo execution test required')
+    now=timestamp(now_ms)
+    if timestamp(started_at_ms)>now: raise ValueError('Invalid start time')
+    fresh(instrument_received_at_ms,now,60000);fresh(balance_received_at_ms,now,5000)
+    quote_time=timestamp(quote.get('ts'));fresh(quote_time,now,15000)
+    if quote.get('symbol')!=symbol: raise ValueError('Quote mismatch')
+    spec=instrument_spec(instrument)
+    if spec['symbol']!=symbol: raise ValueError('Instrument mismatch')
+    if type(leverage) is not int or not 1<=leverage<=3: raise ValueError('Verified leverage required')
+    with localcontext() as context:
+        context.prec=60
+        equity=positive(equity_usdt,'equity');available=positive(available_usdt,'available')
+        anchor=align(positive(quote.get('price'),'quote'),spec['tick_sz'],ROUND_CEILING)
+        stop=align(anchor*Decimal('.99'),spec['tick_sz'],ROUND_FLOOR)
+        target=anchor+2*(anchor-stop)
+        qty=align(spec['min_sz'],spec['lot_sz'],ROUND_CEILING)
+        planned=demo_plan(account_scope=account_scope,signal_id=TEST_VERSION+':once',
+            instrument=instrument,side='buy',contracts=qty,price=anchor,stop=stop,target=target,
+            equity_usdt=equity,leverage=leverage,demo=True)
+        planned['purpose']='execution_test'
+        notional=qty*spec['ct_val']*anchor*Decimal('1.0002')
+        margin=notional/leverage;fee=notional*Decimal('.0005')
+        if (notional>50 or margin>min(Decimal(10),equity*Decimal('.01'))
+                or positive(planned['modeled_loss_usdt'],'loss')>min(Decimal(1),equity*Decimal('.001'))
+                or margin+fee>available or qty>positive(instrument.get('maxMktSz'),'maximum')
+                or qty>positive(instrument.get('maxStopSz'),'stop maximum')):
+            raise ValueError('Minimum contract exceeds execution-test risk cap')
+        return dict(plan=planned,strategy=TEST_VERSION,symbol=symbol,account_scope=account_scope,
+            signal_id='once',signal_ready_at_ms=quote_time,
+            expires_at_ms=min(quote_time+15000,balance_received_at_ms+5000,instrument_received_at_ms+60000),
+            sizing=dict(contracts=str(qty),base_quantity=str(qty*spec['ct_val']),entry_anchor=str(anchor),
+                modeled_margin_usdt=str(margin),modeled_entry_fee_usdt=str(fee),modeled_loss_usdt=planned['modeled_loss_usdt'],binding_cap='minimum_test_size'),
+            submission_enabled=False)

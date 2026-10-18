@@ -5,6 +5,7 @@ and two account readers bound to the same configured demo credentials/UID.
 No scheduler or deployment is created. Emergency paths stop for separate review.
 """
 import asyncio
+import json
 from copy import deepcopy
 
 from okx_demo_reconciliation import DemoReconciliationRunner
@@ -17,7 +18,7 @@ from okx_risk import SYMBOLS
 
 
 class DemoTradingSupervisor:
-    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False):
+    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False,execution_test=False):
         if (type(session) is not DemoTradingSession or type(reconciliation) is not DemoReconciliationRunner
                 or reconciliation.lifecycle is not session.lifecycle
                 or type(reconciliation.reader.transport) is not OKXDemoReadTransport
@@ -33,6 +34,10 @@ class DemoTradingSupervisor:
         self.session,self.reconciliation,self.source=session,reconciliation,source
         self.enabled=enabled is True
         self.scan_markets=scan_markets is True
+        self.execution_test=execution_test is True
+        if self.execution_test and (max_seconds>90 or self.scan_markets or not session.execution_test_enabled
+                or not session.authority.execution_test_enabled):
+            raise ValueError('Explicit test admission in one-market mode required')
         self.max_seconds,self.poll_seconds=max_seconds,poll_seconds
         self.stop_event=asyncio.Event()
         self.started_at=None
@@ -119,7 +124,7 @@ class DemoTradingSupervisor:
         if self.stop_event.is_set(): return outcome('stop_requested')
         source=deepcopy(source)
         source['started_at_ms']=self.started_at
-        return self._scan_status(await self.session.enter(source),selected)
+        return self._scan_status(await self.session.enter(source,execution_test=True) if self.execution_test else await self.session.enter(source),selected)
 
     async def run(self,*,initialize_baseline=False,arm_entries=False,resume_idle=False,on_status=None):
         if not self.enabled or not self.session.armed(): return outcome('disabled')
@@ -131,7 +136,11 @@ class DemoTradingSupervisor:
         self.started_at=owner._now()
         if not owner.acquire(): return outcome('lease_busy')
         try:
-            active=self.session.db.execute('SELECT 1 FROM demo_intent').fetchone()
+            active=self.session.db.execute('SELECT plan FROM demo_intent').fetchone()
+            if self.execution_test and active is not None:
+                try: owned_test=json.loads(active[0]).get('purpose')=='execution_test'
+                except Exception: owned_test=False
+                if not owned_test: return outcome('existing_strategy_intent_preserved')
             if active is None:
                 initial=await self.reconciliation.run_once(initialize_baseline=initialize_baseline,resume_idle=resume_idle)
                 if initial['phase'] not in {'baseline_initialized','idle_verified'}:
@@ -142,9 +151,14 @@ class DemoTradingSupervisor:
                 owner.set_kill_switch(False)
             # Recovery after restart never implicitly clears a takeover kill switch.
             reason='runtime_limit'
+            test_protection=False
             while not self.stop_event.is_set() and loop.time()<deadline:
                 result=await self.tick()
                 if on_status is not None: on_status(deepcopy(result))
+                if self.execution_test:
+                    test_protection=result['phase']=='native_protection_verified_monitor_required'
+                    reason='execution_test_cycle'
+                    break
                 if result['phase'] not in {'waiting_for_signal','entry_gate_blocked','cycle_archived',
                     'native_protection_verified_monitor_required','kill_switch_active','market_preflight_blocked'}:
                     reason=result['phase']
@@ -153,7 +167,14 @@ class DemoTradingSupervisor:
                 try: await asyncio.wait_for(self.stop_event.wait(),timeout=remaining)
                 except TimeoutError: pass
             if self.stop_event.is_set(): reason='stop_requested'
-            return (await self._cleanup())|{'stop_reason':reason}
+            final=(await self._cleanup())|{'stop_reason':reason}
+            if self.execution_test:
+                flat=final['phase']=='flat_requires_emergency_settlement_review'
+                final.update(execution_test=True,protection_verified=test_protection,
+                    test_roundtrip_verified=test_protection and flat,
+                    flat_verified=flat,strategy_performance_sample=False)
+                final.update(self.session.execution_test_diagnostics)
+            return final
         except asyncio.CancelledError:
             await self._cleanup()
             raise

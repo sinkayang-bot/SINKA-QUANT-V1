@@ -5,7 +5,7 @@ Snapshots are supplied by a trusted-reader port, not authenticated here.
 """
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, localcontext
+from decimal import ROUND_CEILING, Decimal, localcontext
 import hashlib
 import json
 import re
@@ -27,7 +27,7 @@ def snapshot_digest(snapshot):
 
 
 class DemoEntryAuthority:
-    def __init__(self, journal, *, account_scope, worker_id, clock, session_id=None):
+    def __init__(self, journal, *, account_scope, worker_id, clock, session_id=None,enable_execution_test=False):
         for value in (account_scope, worker_id):
             if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", value):
                 raise ValueError("Stable account and worker identity required")
@@ -41,6 +41,7 @@ class DemoEntryAuthority:
         self.snapshot = None
         self.approved = None
         self.seen_clock = 0
+        self.execution_test_enabled=enable_execution_test is True
         self.db.execute("CREATE TABLE IF NOT EXISTS demo_authority ("
             "singleton INTEGER PRIMARY KEY CHECK(singleton=1),scope TEXT NOT NULL,"
             "worker TEXT,session TEXT,epoch INTEGER NOT NULL,expires INTEGER NOT NULL,"
@@ -206,7 +207,11 @@ class DemoEntryAuthority:
             raise ValueError("Account is not flat")
         plan = candidate["plan"]
         body = plan["body"]
-        if (candidate.get("account_scope") != self.scope or candidate.get("strategy") != "SNR-5M-1"
+        testing=candidate.get('strategy')=='DEMO-EXECUTION-TEST-1'
+        if testing and (not self.execution_test_enabled or body['instId']!='BTC-USDT-SWAP'
+                or body['side']!='buy' or candidate.get('signal_id')!='once' or plan.get('purpose')!='execution_test'):
+            raise ValueError('Execution test not enabled')
+        if (candidate.get("account_scope") != self.scope or candidate.get("strategy") not in {"SNR-5M-1","DEMO-EXECUTION-TEST-1"}
                 or candidate["symbol"] != snapshot["symbol"] or body["instId"] != snapshot["symbol"] or plan.get("environment") != "demo"
                 or plan.get("submission_enabled") is not False or candidate.get("submission_enabled") is not False
                 or candidate["expires_at_ms"] < now
@@ -221,10 +226,11 @@ class DemoEntryAuthority:
             side = 1 if body["side"] == "buy" else -1
             entry = anchor * (1 + side * Decimal("0.0002"))
             bracket = body["attachAlgoOrds"][0]
-            recalculated = demo_plan(account_scope=self.scope, signal_id="SNR5M1:" + candidate["signal_id"],
+            recalculated = demo_plan(account_scope=self.scope, signal_id=("DEMO-EXECUTION-TEST-1:" if testing else "SNR5M1:") + candidate["signal_id"],
                 instrument=snapshot["instrument"], side=body["side"], contracts=qty,
                 price=anchor, stop=bracket["slTriggerPx"], target=bracket["tpTriggerPx"],
                 equity_usdt=equity, leverage=snapshot["isolated_leverage"], demo=True)
+            if testing: recalculated['purpose']='execution_test'
             margin = qty * spec["ct_val"] * max(anchor, entry) / snapshot["isolated_leverage"]
             fee = qty * spec["ct_val"] * entry * Decimal("0.0005")
             if (recalculated != plan or qty * spec["ct_val"] != positive(sizing["base_quantity"], "base quantity")
@@ -235,6 +241,12 @@ class DemoEntryAuthority:
                     or qty > positive(snapshot["instrument"].get("maxMktSz"), "market maximum")
                     or qty > positive(snapshot["instrument"].get("maxStopSz"), "stop maximum")):
                 raise ValueError("Candidate differs from current verified account/specification")
+        if testing:
+            minimum=(spec['min_sz']/spec['lot_sz']).to_integral_value(rounding=ROUND_CEILING)*spec['lot_sz']
+            if (qty!=minimum or qty*spec['ct_val']*max(anchor,entry)>50
+                    or margin>min(Decimal(10),equity*Decimal('.01'))
+                    or positive(plan['modeled_loss_usdt'],'loss')>min(Decimal(1),equity*Decimal('.001'))):
+                raise ValueError('Execution-test minimum size and strict caps required')
         daily = self.db.execute("SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?", (day_key(now),)).fetchone()
         if (daily is None or any(type(v) is not int or v < 0 for v in daily)
                 or daily[1] >= 3 or daily[2] or now < daily[3]):

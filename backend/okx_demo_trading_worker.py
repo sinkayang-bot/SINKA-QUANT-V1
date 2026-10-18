@@ -82,7 +82,10 @@ def execute(environ=None):
     if any(not env.get(name) for name in REQUIRED): return outcome('configuration_missing'),2
     journal=None
     try:
+        execution_test=env.get('DEMO_EXECUTION_TEST')=='1'
         duration=int(env.get('DEMO_MAX_SECONDS','300'))
+        if execution_test and (duration>90 or env.get('DEMO_SCAN_MARKETS')=='20'):
+            raise ValueError('Bounded one-market execution test required')
         poll=int(env.get('DEMO_POLL_SECONDS','5'))
         if not 1<=duration<=900 or not 2<=poll<=10: raise ValueError('Bounded runtime required')
         path=Path(env['DEMO_LEDGER_PATH'])
@@ -104,14 +107,14 @@ def execute(environ=None):
             reader_args['symbol']=active_symbol
         reader=DemoSnapshotReader(trading,**reader_args)
         read_reader=DemoSnapshotReader(readonly,**reader_args)
-        owner=DemoEntryAuthority(journal,account_scope=reader.scope,worker_id='demo-strategy',clock=clock)
+        owner=DemoEntryAuthority(journal,account_scope=reader.scope,worker_id='demo-strategy',clock=clock,enable_execution_test=execution_test)
         lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
-        session=DemoTradingSession(lifecycle,reader,enabled=True)
+        session=DemoTradingSession(lifecycle,reader,enabled=True,enable_execution_test=execution_test)
         reconciliation=DemoReconciliationRunner(lifecycle,read_reader,enabled=True)
-        supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner() if multi else DemoStrategySource(),enabled=True,
-            max_seconds=duration,poll_seconds=poll,scan_markets=multi)
+        supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner() if multi else DemoStrategySource(execution_test=execution_test),enabled=True,
+            max_seconds=duration,poll_seconds=poll,scan_markets=multi,execution_test=execution_test)
         result=asyncio.run(run_supervisor(supervisor,env))
-        clean=(result['phase']=='verified_but_not_armed' or
+        clean=((execution_test and result.get('test_roundtrip_verified') is True) or result['phase']=='verified_but_not_armed' or
             (result['phase']=='stopped_no_active_intent' and result.get('stop_reason') in {'stop_requested','runtime_limit'}))
         return result,0 if clean else 2
     except KeyboardInterrupt:

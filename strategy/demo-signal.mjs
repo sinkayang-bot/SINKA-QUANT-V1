@@ -14,9 +14,15 @@ export function sourceFromSnapshot(snapshot,{symbol,startedAt,now}) {
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   try{
     const [symbol,started]=process.argv.slice(2);
-    if(process.argv.length!==4||!SYMBOLS.includes(symbol)||!/^\d+$/.test(started??''))throw Error('Invalid arguments');
+    const testing=process.argv.length===5&&process.argv[4]==='--execution-test'&&symbol==='BTC-USDT-SWAP';
+    if((process.argv.length!==4&&!testing)||!SYMBOLS.includes(symbol)||!/^\d+$/.test(started??''))throw Error('Invalid arguments');
     const snapshot=await createMarketClient().snapshot(symbol,AbortSignal.timeout(5000));
-    const source=sourceFromSnapshot(snapshot,{symbol,startedAt:Number(started),now:Date.now()});
+    let source;
+    if(testing){
+      const now=Date.now();validateSnapshot(snapshot,now);
+      if(snapshot.quoteTs>now)throw Error('Future quote');
+      source={strategy_version:'DEMO-EXECUTION-TEST-1',signal:null,quote:{symbol,price:String(snapshot.price),ts:snapshot.quoteTs}};
+    }else source=sourceFromSnapshot(snapshot,{symbol,startedAt:Number(started),now:Date.now()});
     process.stdout.write(JSON.stringify({source})+'\n');
   }catch{
     process.stdout.write(JSON.stringify({error:'market_source_unavailable'})+'\n');process.exitCode=2;

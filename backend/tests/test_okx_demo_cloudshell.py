@@ -254,3 +254,22 @@ def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsy
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
     assert captured['DEMO_PROGRESS']=='1'
     assert 'synthetic' not in capsys.readouterr().out
+
+
+def test_one_shot_entry_uses_same_worker_and_bounded_runtime(monkeypatch,capsys):
+    captured={}
+    monkeypatch.setattr(setup,'persistent_storage',lambda path:None)
+    monkeypatch.setattr(setup,'credentials',lambda:DemoCredentials('synthetic','synthetic','synthetic'))
+    monkeypatch.setattr(setup,'prepare',lambda *a,**k:({'account_scope':'scope','uid':'123'},True))
+    monkeypatch.setattr(setup,'command',lambda args:'v24.21.0')
+    def execute(env):
+        captured.update(env)
+        return {'phase':'test_result'},0
+    monkeypatch.setattr(setup,'execute',execute)
+    assert setup.main(['--run','--resume-idle','--test-entry'])==0
+    assert captured['DEMO_EXECUTION_TEST']=='1'
+    assert captured['DEMO_MAX_SECONDS']=='90'
+    assert captured['DEMO_SCAN_MARKETS']=='1'
+    assert captured['DEMO_LEDGER_PATH'].endswith('/sinka-demo-trial/ledger.sqlite')
+    assert captured['DEMO_INITIALIZE_BASELINE']=='0'
+    assert 'synthetic' not in capsys.readouterr().out

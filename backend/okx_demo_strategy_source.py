@@ -9,7 +9,8 @@ from okx_strategy_bridge import timestamp
 
 
 class DemoStrategySource:
-    def __init__(self):
+    def __init__(self,*,execution_test=False):
+        self.execution_test=execution_test is True
         self.script=Path(__file__).resolve().parents[1]/'strategy'/'demo-signal.mjs'
 
     async def __call__(self,symbol,started_at):
@@ -18,7 +19,7 @@ class DemoStrategySource:
         process=None
         try:
             # Do not inherit OKX credentials, proxy settings or NODE_OPTIONS.
-            process=await asyncio.create_subprocess_exec('node',str(self.script),symbol,str(started_at),
+            process=await asyncio.create_subprocess_exec('node',str(self.script),symbol,str(started_at),*(['--execution-test'] if self.execution_test else []),
                 env={'PATH':os.environ.get('PATH',os.defpath)},
                 stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
             async with asyncio.timeout(7):

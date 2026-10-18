@@ -10,6 +10,7 @@ from copy import deepcopy
 from decimal import Decimal
 import hashlib
 import json
+import re
 
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_cycles import DemoCycleLifecycle
@@ -20,7 +21,7 @@ from okx_demo_trading_transport import OKXDemoTradingTransport
 from okx_demo_transport import DEMO_HEADERS
 from okx_orders import ACTIVE, parse_order
 from okx_reconcile import number
-from okx_strategy_bridge import plan_strategy_signal
+from okx_strategy_bridge import plan_strategy_signal,plan_execution_test
 
 
 def outcome(phase):
@@ -29,7 +30,7 @@ def outcome(phase):
 
 
 class DemoTradingSession:
-    def __init__(self,lifecycle,reader,*,enabled=False):
+    def __init__(self,lifecycle,reader,*,enabled=False,enable_execution_test=False):
         if (not isinstance(lifecycle,DemoCycleLifecycle) or not isinstance(reader,DemoSnapshotReader)
                 or type(reader.transport) is not OKXDemoTradingTransport
                 or lifecycle.authority.scope != reader.scope):
@@ -39,6 +40,8 @@ class DemoTradingSession:
         self.db,self.broker=self.journal.db,reader.transport
         self.enabled=enabled is True
         self.entry_stop_requested=False
+        self.execution_test_enabled=enable_execution_test is True
+        self.execution_test_diagnostics={}
         if not hasattr(self.authority,'reconciliation_lock'):
             self.authority.reconciliation_lock=asyncio.Lock()
         self.lock=self.authority.reconciliation_lock
@@ -64,7 +67,10 @@ class DemoTradingSession:
         if not self.armed(): raise ValueError('Demo session disabled')
         return now
 
-    async def enter(self,source):
+    async def enter(self,source,*,execution_test=False):
+        if type(execution_test) is not bool: raise ValueError("Boolean execution test required")
+        if execution_test and not self.execution_test_enabled: return outcome("execution_test_disabled")
+        planner=plan_execution_test if execution_test else plan_strategy_signal
         if not self.armed(): return outcome('disabled')
         if self.entry_stop_requested: return outcome('stop_requested')
         if self.lock.locked(): return outcome('busy')
@@ -93,23 +99,30 @@ class DemoTradingSession:
                     balance_received_at_ms=proof['received_at_ms'],
                     instrument_received_at_ms=proof['received_at_ms'],demo=True)
                 frozen.pop('now_ms',None)
-                candidate=plan_strategy_signal(**frozen,now_ms=self._owner())
+                candidate=planner(**frozen,now_ms=self._owner())
                 if not self.authority.allows(candidate): return outcome('entry_gate_blocked')
                 client_id=self.journal.register(candidate['plan'])
                 self.journal.reserve_entry(client_id)
                 self.db.execute('INSERT INTO demo_trading_clock VALUES(?,?)',(client_id,self._owner()))
                 # No await between the final durable owner/risk check and dispatch.
-                current=plan_strategy_signal(**frozen,now_ms=self._owner())
+                current=planner(**frozen,now_ms=self._owner())
                 if self.entry_stop_requested or current != candidate or not self.authority.allows(current):
                     self.journal.entry_receipt(client_id,'blocked_before_send')
                     self.halt()
                     return outcome('entry_blocked_after_reservation')
+                response=None
                 try:
                     response=await self.broker.place_entry(deepcopy(candidate['plan']['body']),
                         dict(DEMO_HEADERS),deadline_ms=candidate['expires_at_ms'])
                     order_id=receipt(response,client_id)
                 except Exception:
                     order_id=None
+                if execution_test and isinstance(response,dict):
+                    code=response.get('code');rows=response.get('data',[])
+                    subcode=rows[0].get('sCode') if len(rows)==1 else None
+                    self.execution_test_diagnostics={key:value for key,value in (
+                        ('entry_api_code',code),('entry_event_code',subcode))
+                        if isinstance(value,str) and re.fullmatch(r'[0-9]{1,8}',value)}
                 self.journal.entry_receipt(client_id,'acknowledged' if order_id else 'unknown',order_id)
                 # Even unknown receipts are queried using the original client ID.
                 return await self._recover(client_id)
