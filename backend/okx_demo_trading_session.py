@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 
+from okx_demo_read_errors import failure_kind
 from okx_demo_bill_reader import DemoBillReader
 from okx_demo_cycles import DemoCycleLifecycle,unresolved_emergency_exit
 from okx_demo_executor import receipt
@@ -159,9 +160,13 @@ class DemoTradingSession:
             except asyncio.CancelledError:
                 self.halt()
                 raise
-            except Exception:
+            except Exception as error:
                 self.halt()
-                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,'protection_diagnostics':dict(self.recovery_diagnostics)}
+                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,
+                    'failure_kind':failure_kind(error),
+                    'snapshot_stage':getattr(error,'stage',None) if getattr(error,'stage',None) in {
+                        'account_config','inventory_first_pass','inventory_second_pass','snapshot_consistency'} else None,
+                    'protection_diagnostics':dict(self.recovery_diagnostics)}
 
     async def recover(self,client_id,*,force_exit=False):
         if not self.armed(): return outcome('disabled')
@@ -174,9 +179,13 @@ class DemoTradingSession:
             except asyncio.CancelledError:
                 self.halt()
                 raise
-            except Exception:
+            except Exception as error:
                 self.halt()
-                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,'protection_diagnostics':dict(self.recovery_diagnostics)}
+                return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,
+                    'failure_kind':failure_kind(error),
+                    'snapshot_stage':getattr(error,'stage',None) if getattr(error,'stage',None) in {
+                        'account_config','inventory_first_pass','inventory_second_pass','snapshot_consistency'} else None,
+                    'protection_diagnostics':dict(self.recovery_diagnostics)}
 
     def _recovery_reader(self):
         return DemoSnapshotReader(self.broker,account_scope=self.reader.scope,expected_uid=self.reader.uid,

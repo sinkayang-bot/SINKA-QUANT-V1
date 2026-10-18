@@ -179,6 +179,7 @@ class DemoTradingSupervisor:
             reason='runtime_limit'
             test_protection=False
             test_attempts=[]
+            stop_diagnostics=None
             while not self.stop_event.is_set() and loop.time()<deadline:
                 result=await self.tick()
                 if on_status is not None: on_status(deepcopy(result))
@@ -203,12 +204,17 @@ class DemoTradingSupervisor:
                 if result['phase'] not in {'waiting_for_signal','entry_gate_blocked','cycle_archived',
                     'native_protection_verified_monitor_required','kill_switch_active','market_preflight_blocked'}:
                     reason=result['phase']
+                    # Preserve the original read/validation failure before cleanup
+                    # changes the session stage or protection observations.
+                    stop_diagnostics=deepcopy(result)
                     break
                 remaining=min(self.poll_seconds,max(0,deadline-loop.time()))
                 try: await asyncio.wait_for(self.stop_event.wait(),timeout=remaining)
                 except TimeoutError: pass
             if self.stop_event.is_set(): reason='stop_requested'
             final=(await self._cleanup())|{'stop_reason':reason}
+            if stop_diagnostics is not None:
+                final['stop_diagnostics']=stop_diagnostics
             if self.execution_test:
                 flat=final['phase']=='flat_requires_emergency_settlement_review'
                 test_protection=test_protection or self.session.recovery_protection_verified

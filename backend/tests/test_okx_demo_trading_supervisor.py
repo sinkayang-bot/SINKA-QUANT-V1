@@ -89,6 +89,19 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sources,[])
         self.assertIs(self.f.posts[-1][1]['reduceOnly'],True)
 
+    async def test_original_failure_survives_cleanup_stage_change(self):
+        await self.session.enter(args())
+        original={'phase':'blocked_reconciliation_required','recovery_stage':'protection_fill_audit',
+            'failure_kind':'validation_failed','protection_diagnostics':{'pending_algo_count':1}}
+        async def failed_tick(): return original
+        self.supervisor.tick=failed_tick
+        result=await self.supervisor.run()
+        self.assertEqual(result['phase'],'flat_requires_emergency_settlement_review')
+        self.assertEqual(result['stop_diagnostics'],original)
+        self.assertEqual(result['stop_diagnostics']['recovery_stage'],'protection_fill_audit')
+        self.assertEqual(len(self.f.posts),2)
+        self.assertIs(self.f.posts[-1][1]['reduceOnly'],True)
+
     async def test_source_failure_is_reported_and_stops_without_dispatch(self):
         async def broken(*args): raise RuntimeError('private-source-detail')
         self.supervisor.source=broken
