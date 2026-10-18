@@ -79,6 +79,22 @@ class RunnerTests(unittest.TestCase):
         self.runner.enabled=True; self.t.audit.enabled=False
         self.assertEqual(self.run_once()['phase'],'cycle_transition_disabled'); self.assertEqual(self.f.calls,[])
 
+    def test_isolated_margin_close_archives_then_resumes_idle_without_duplicate_risk(self):
+        for row in self.f.bills:
+            if row['type']=='2':
+                margin=Decimal('12.5') if row['subType']=='1' else Decimal('-12.5')
+                row.update(posBalChg=str(margin),balChg=str(Decimal(row['balChg'])-margin))
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        db=self.t.journal.db
+        archive=json.loads(db.execute('SELECT body FROM demo_cycle_archive').fetchone()[0])
+        bill_records=archive['records']['demo_account_bill']
+        bodies=[json.loads(r[bill_records['columns'].index('body')]) for r in bill_records['rows']]
+        self.assertEqual(sum(Decimal(r.get('posBalChg','0')) for r in bodies),0)
+        self.assertEqual(len([r for r in bodies if 'posBalChg' in r]),2)
+        self.assertEqual(self.run_once()['phase'],'idle_verified')
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
     def test_unsubmitted_intent_preserved_without_request_or_resubmit(self):
         self.t.journal.db.execute('UPDATE demo_intent SET dispatched=0')
         self.assertEqual(self.run_once()['phase'],'unsubmitted_intent_preserved')

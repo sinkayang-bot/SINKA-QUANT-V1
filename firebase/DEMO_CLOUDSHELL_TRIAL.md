@@ -167,6 +167,16 @@ worker summary retains `entry_gate_counts` and `last_entry_block` (including
 the scan tick and allowlisted symbol) even after later waiting ticks. These
 diagnostics do not change risk limits, admission checks or order submission.
 
+Native strategy-close settlement also reconciles explicit isolated position
+cash movements (`posBalChg`) on the exact matched entry/exit fill bills. Each
+bill must satisfy `balChg + posBalChg = pnl + fee`, all position cash movements
+must sum to zero for the flat-to-flat cycle, and total account cash change must
+still equal audited net PnL. Missing position fields cannot explain a nonzero
+cash discrepancy. Funding bills cannot carry position transfers. Both complete
+bill scans, original fill ownership, protection-child proof, flat snapshots
+and atomic archive/risk publication remain required. No extra order is sent by
+settlement, and returned margin is never counted as trading profit.
+
 Normal idle monitoring still requires audit continuity within 60 seconds.
 Explicit `--resume-idle` permits GET-only reconciliation of a never-traded first
 cycle whose ORIGINAL baseline is at most 12 hours old. That case requires no entry

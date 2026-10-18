@@ -21,8 +21,8 @@ def bill(raw):
         raise ValueError('Invalid bill identity')
     for field in ('pnl','fee','balChg'):
         result[field]=money(raw.get(field))
-    # Preserve explicit position cash changes for read-only isolated reviews.
-    # Missing is not silently invented as zero. Existing settlement stays strict.
+    # Preserve explicit position cash changes. A missing field cannot explain
+    # an account cash movement that differs from the matched fill's pnl+fee.
     if raw.get('posBalChg') not in (None,''):
         result['posBalChg']=money(raw['posBalChg'])
     for field in ('sz','px'):
@@ -102,12 +102,14 @@ class DemoSettlementAuditor(DemoClosedTradeAuditor):
         if rows!=scan(passes[1],begin,through): raise ValueError('Bills changed between passes')
         fills={f['instId']+':'+f['tradeId']:f for f in (json.loads(r[0]) for r in self.db.execute('SELECT body FROM demo_audit_fills WHERE baseline=0'))}
         if sorted(fills)!=trade['fill_ids']: raise ValueError('Closed fill set changed')
-        seen=set(); funding=Decimal(0); movement=Decimal(0)
+        seen=set(); funding=Decimal(0); movement=Decimal(0); position_movement=Decimal(0)
         with localcontext() as ctx:
             ctx.prec=512
             for row in rows.values():
                 pnl,fee,delta=(Decimal(row[k]) for k in ('pnl','fee','balChg'))
-                if delta!=pnl+fee: raise ValueError('Unsupported account/position balance movement')
+                position_delta=Decimal(row.get('posBalChg','0'))
+                if delta+position_delta!=pnl+fee:
+                    raise ValueError('Unsupported account/position balance movement')
                 if row['instId']!=trade['symbol']: raise ValueError('Foreign account bill')
                 if row['type']=='2' and row['subType'] in {'1','2','3','4','5','6'}:
                     identity=row['instId']+':'+ident(row['tradeId']); fill=fills.get(identity)
@@ -120,17 +122,18 @@ class DemoSettlementAuditor(DemoClosedTradeAuditor):
                     seen.add(identity)
                 elif row['type']=='8' and row['subType'] in {'173','174'}:
                     first=max(int(f['fillTime']) for f in fills.values() if f['ordId']==trade['entry_order_id'])
-                    if (Decimal(row['sz'])!=Decimal(trade['contracts']) or row['ordId']!='' or row['tradeId']!='' or fee!=0
+                    if (Decimal(row['sz'])!=Decimal(trade['contracts']) or row['ordId']!='' or row['tradeId']!='' or fee!=0 or position_delta!=0
                             or not first<=int(row['ts'])<=trade['closed_at_ms']
                             or (row['subType']=='173' and pnl>=0) or (row['subType']=='174' and pnl<=0)):
                         raise ValueError('Funding attribution or sign mismatch')
                     funding+=pnl
                 else: raise ValueError('Unclassified transfer, liquidation or adjustment bill')
                 movement+=delta
+                position_movement+=position_delta
             if seen!=set(fills): raise ValueError('Trade bill missing')
             net=Decimal(trade['trading_net_usdt'])+funding
             cash=Decimal(money(snapshot.get('cash_balance_usdt')))
-            if movement!=net or cash-Decimal(baseline[0])!=movement:
+            if position_movement!=0 or movement!=net or cash-Decimal(baseline[0])!=movement:
                 raise ValueError('USDT cash movement does not reconcile')
             result=dict(client_id=client_id,net_usdt=fixed(net),funding_usdt=fixed(funding),
                 cash_before_usdt=baseline[0],cash_after_usdt=fixed(cash),bill_ids=sorted(rows,key=int),

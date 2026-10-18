@@ -78,6 +78,51 @@ class SettlementTests(unittest.TestCase):
         self.assertEqual(Decimal(result['net_usdt']),Decimal(trade['trading_net_usdt']))
         self.assertEqual(result['funding_usdt'],'0')
 
+    def isolated(self,evidence):
+        for pages in evidence['passes']:
+            for row in pages[0]['data']:
+                if row['type']=='2':
+                    margin=Decimal('12.5') if row['subType']=='1' else Decimal('-12.5')
+                    row['posBalChg']=str(margin)
+                    row['balChg']=str(Decimal(row['balChg'])-margin)
+        return evidence
+
+    def test_isolated_margin_roundtrip_reconciles_without_counting_margin_as_profit(self):
+        snap,e,trade,_,_=self.prepared('-1'); self.isolated(e)
+        result=self.audit.settle(snap,e)
+        self.assertEqual(Decimal(result['net_usdt']),Decimal(trade['trading_net_usdt'])-1)
+        saved=[json.loads(r[0]) for r in self.journal.db.execute('SELECT body FROM demo_account_bill')]
+        self.assertEqual(sum(Decimal(r.get('posBalChg','0')) for r in saved),0)
+        self.assertEqual(len([r for r in saved if 'posBalChg' in r]),2)
+        self.assertEqual(self.audit.settle(snap,e),result)
+        self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+
+    def test_isolated_missing_changed_or_unreturned_margin_fails_atomically(self):
+        snap,e,_,_,_=self.prepared('0'); self.isolated(e)
+        for change in ('missing','identity','not_returned','passes','cash'):
+            bad=deepcopy(e); raw=deepcopy(snap)
+            for pages in bad['passes']:
+                row=pages[0]['data'][0]
+                if change=='missing': row.pop('posBalChg')
+                if change=='identity': row['tradeId']='999'
+                if change=='not_returned':
+                    # Keep the per-bill equation and cash check valid; the
+                    # flat-to-flat position cash invariant must still reject.
+                    row['posBalChg']=str(Decimal(row['posBalChg'])+1)
+                    row['balChg']=str(Decimal(row['balChg'])-1)
+            if change=='not_returned': raw['cash_balance_usdt']=str(Decimal(raw['cash_balance_usdt'])-1)
+            if change=='passes': bad['passes'][1][0]['data'][0]['posBalChg']='0'
+            if change=='cash': raw['cash_balance_usdt']='10000'
+            with self.subTest(change=change): self.reject(raw,bad)
+
+    def test_funding_bill_cannot_hide_position_cash_transfer(self):
+        snap,e,_,_,_=self.prepared('-1')
+        for pages in e['passes']:
+            funding=pages[0]['data'][0]; fill=pages[0]['data'][1]
+            funding.update(posBalChg='1',balChg='-2')
+            fill.update(posBalChg='-1',balChg=str(Decimal(fill['balChg'])+1))
+        self.reject(snap,e)
+
     def test_funding_can_turn_gross_profit_into_net_loss_and_halt_third_loss(self):
         snap,e,trade,_,_=self.prepared('-100')
         self.journal.db.execute('UPDATE demo_daily SET loss_streak=2')
