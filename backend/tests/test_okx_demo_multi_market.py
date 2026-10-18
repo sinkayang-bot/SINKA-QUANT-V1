@@ -78,7 +78,7 @@ class ScannerTests(unittest.IsolatedAsyncioTestCase):
         class Process:
             returncode=0
             async def communicate(self): return json.dumps(payload).encode(),None
-        async def spawn(*a,**k): captured.update(k);return Process()
+        async def spawn(*a,**k): captured.update(k);captured['argv']=a;return Process()
         scanner=DemoMarketScanner()
         with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',side_effect=spawn),patch.dict('os.environ',{'OKX_API_KEY':'private','NODE_OPTIONS':'private'}):
             self.assertEqual((await scanner('BTC-USDT-SWAP',1))['quote']['symbol'],'ETH-USDT-SWAP')
@@ -86,6 +86,9 @@ class ScannerTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await scanner('BTC-USDT-SWAP',1))
         self.assertEqual(set(captured['env']),{'PATH'})
         self.assertEqual(scanner.last_scan['excluded'],1)
+        with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',side_effect=spawn):
+            await DemoMarketScanner(profile='expanded')('BTC-USDT-SWAP',1)
+            self.assertEqual(captured['argv'][-1],'--expanded')
         payload['scan'].update(breakout_not_met=18,trend_not_met=1,warmup=0,invalid_stop=0)
         with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',side_effect=spawn):
             await scanner('BTC-USDT-SWAP',1)

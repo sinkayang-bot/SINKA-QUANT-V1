@@ -115,6 +115,23 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.f.posts),1)
         self.assertEqual(self.journal.db.execute('SELECT entries FROM demo_daily').fetchone()[0],1)
 
+    async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
+        result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(len(self.f.posts),1)
+        self.assertEqual((await self.session.enter(args(strategy_version='SNR-5M-RETEST-1')))['phase'],'existing_intent_recovery_required')
+        self.assertEqual(len(self.f.posts),1)
+
+    async def test_narrow_stop_candidate_skips_without_killing_next_valid_signal(self):
+        source=args(strategy_version='SNR-5M-FAST-1')
+        source['signal']['stop']='100.99'
+        result=await self.session.enter(source)
+        self.assertEqual(result['gate_reason'],'signal_stop_distance')
+        self.assertEqual(self.f.posts,[])
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],0)
+        self.assertEqual((await self.session.enter(args()))['phase'],'native_protection_verified_monitor_required')
+
     async def test_demo_without_daily_limits_enters_with_existing_halt_and_still_prevents_duplicate(self):
         self.owner.daily_limits_enabled=False
         self.journal.db.execute('UPDATE demo_daily SET entries=6,loss_streak=3,halt=1,cooldown=?',(self.f.now+900000,))

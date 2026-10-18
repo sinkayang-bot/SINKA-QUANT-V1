@@ -109,7 +109,18 @@ class DemoTradingSession:
                 if execution_test:
                     # The immutable archive sequence, never caller text or a random nonce.
                     frozen['test_cycle']=self.lifecycle.verify_archive_chain()[0]
-                candidate=planner(**frozen,now_ms=self._owner())
+                try:
+                    candidate=planner(**frozen,now_ms=self._owner())
+                except ValueError as error:
+                    # These pure planner rejections mean this market candidate
+                    # cannot be sized/entered, not that account evidence failed.
+                    reasons={'Entry drift exceeds half ATR':'signal_price_drift',
+                        'Rounded entry drift exceeds half ATR':'signal_price_drift',
+                        'Rounded stop distance outside strategy limits':'signal_stop_distance',
+                        'Risk budget cannot fund the minimum contract size':'minimum_size_not_funded'}
+                    reason=reasons.get(str(error))
+                    if execution_test or reason is None: raise
+                    return outcome('entry_gate_blocked')|{'gate_reason':reason,'retry_after_seconds':0}
                 if not self.authority.allows(candidate):
                     now=self._owner()
                     daily=self.db.execute('SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(now),)).fetchone()

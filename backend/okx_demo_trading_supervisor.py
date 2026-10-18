@@ -17,6 +17,7 @@ from okx_demo_close_reader import DemoCloseReader
 from okx_demo_cycles import unresolved_emergency_exit
 from okx_demo_manual_review import retained_in_transaction
 from okx_risk import SYMBOLS
+from okx_strategy_bridge import STRATEGY_PREFIXES
 
 
 class DemoTradingSupervisor:
@@ -127,7 +128,10 @@ class DemoTradingSupervisor:
         if self.stop_event.is_set(): return outcome('stop_requested')
         source=deepcopy(source)
         source['started_at_ms']=self.started_at
-        return self._scan_status(await self.session.enter(source,execution_test=True) if self.execution_test else await self.session.enter(source),selected)
+        result=self._scan_status(await self.session.enter(source,execution_test=True) if self.execution_test else await self.session.enter(source),selected)
+        if source.get('strategy_version') in STRATEGY_PREFIXES:
+            result['selected_strategy']=source['strategy_version']
+        return result
 
     async def run(self,*,initialize_baseline=False,arm_entries=False,resume_idle=False,on_status=None):
         if not self.enabled or not self.session.armed(): return outcome('disabled')

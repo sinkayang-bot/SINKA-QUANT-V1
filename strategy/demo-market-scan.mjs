@@ -1,13 +1,15 @@
 // Public GETs only. Eligibility means liquidity screening, not price stability.
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {RULES,analyze} from './snr-engine.mjs';
+import {RULES} from './snr-engine.mjs';
 import {parseCandles,validateSnapshot} from './public-market.mjs';
+import {selectDemoSignal} from './demo-strategies.mjs';
 export const SCAN_SYMBOLS=Object.freeze(['BTC','ETH','SOL','XRP','DOGE','ADA','AVAX','LINK','DOT','LTC','BCH','TRX','TON','SUI','NEAR','APT','ATOM','UNI','ETC','FIL'].map(x=>x+'-USDT-SWAP'));
 const SYMBOLS=SCAN_SYMBOLS;
 
 // Diagnostic labels only; the original strategy still decides every entry.
 export function noSignalReason(result,bars){
+  if(['breakout_not_met','trend_not_met'].includes(result.diagnostic))return result.diagnostic;
   if(result.reason==='warmup')return 'warmup';
   if(result.reason==='invalid_stop')return 'invalid_stop';
   if(result.reason!=='no_signal')throw Error('Not a rejected strategy result');
@@ -42,7 +44,8 @@ async function inventory(path,params,fetcher,signal){
   if(!r.ok)throw Error('Public inventory unavailable');const body=await r.json();
   if(body.code!=='0'||!Array.isArray(body.data))throw Error('Public inventory invalid');return body.data;
 }
-export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
+export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now,profile='original'}){
+  if(!['original','expanded'].includes(profile))throw Error('Invalid strategy profile');
   if(!Number.isSafeInteger(startedAt)||startedAt<0||startedAt>clock())throw Error('Invalid start');
   const signal=AbortSignal.timeout(8000);
   const [instruments,tickers]=await Promise.all([
@@ -63,11 +66,11 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
         if(quotes.length!==1||quotes[0]?.instId!==symbol)throw Error('Invalid ticker');
         const snapshot={bars:parseCandles(candles),price:Number(quotes[0].last),quoteTs:Number(quotes[0].ts)};
         const now=clock();validateSnapshot(snapshot,now);
-        const result=analyze(snapshot.bars);scan.checked++;
+        const {signal:result,strategy_version}=selectDemoSignal(snapshot.bars,profile);scan.checked++;
         if(result.reason!=='signal'){scan[noSignalReason(result,snapshot.bars)]++;scan.no_signal++;continue;}
         if(result.readyAt<=startedAt){scan.prestart++;continue;}
         if(now-result.readyAt>RULES.signalAgeMs||snapshot.quoteTs>now){scan.expired++;continue;}
-        const source={strategy_version:RULES.version,signal:result,
+        const source={strategy_version,signal:result,
           quote:{symbol,price:String(snapshot.price),ts:snapshot.quoteTs}};
         sources.push({source,index});
       }catch{scan.fetch_failed++;}
@@ -84,7 +87,7 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   try{
-    if(process.argv.length!==3||!/^\d+$/.test(process.argv[2]))throw Error('Invalid arguments');
-    process.stdout.write(JSON.stringify(await scanMarkets({startedAt:Number(process.argv[2])}))+'\n');
+    if(![3,4].includes(process.argv.length)||!/^\d+$/.test(process.argv[2])||(process.argv.length===4&&process.argv[3]!=='--expanded'))throw Error('Invalid arguments');
+    process.stdout.write(JSON.stringify(await scanMarkets({startedAt:Number(process.argv[2]),profile:process.argv[3]==='--expanded'?'expanded':'original'}))+'\n');
   }catch{process.stdout.write('{"error":"market_scan_unavailable"}\n');process.exitCode=2;}
 }

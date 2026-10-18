@@ -61,6 +61,16 @@ class DemoAuthorityTests(unittest.TestCase):
         self.assertFalse(self.authority.allows(self.candidate))
         self.assertTrue(self.authority.recovery_allowed())
 
+    def test_new_demo_strategy_versions_bind_distinct_order_ids_and_cannot_be_relabelled(self):
+        self.ready()
+        original=self.candidate
+        for version in ('SNR-5M-FAST-1','SNR-5M-RETEST-1'):
+            candidate=plan_strategy_signal(**args(strategy_version=version))
+            self.assertNotEqual(candidate['plan']['body']['clOrdId'],original['plan']['body']['clOrdId'])
+            self.assertTrue(self.authority.allows(candidate))
+            forged=deepcopy(candidate);forged['strategy']='SNR-5M-1'
+            self.assertFalse(self.authority.allows(forged))
+
     def no_daily_limits(self):
         self.journal=self.open_journal()
         self.authority=DemoEntryAuthority(self.journal,account_scope='synthetic-v1',worker_id='demo',

@@ -1,5 +1,31 @@
 # Cloud Shell 人工限時驗收
 
+## 擴充模擬訊號
+
+20 幣模式預設 `--strategy-profile expanded`，使用三種版本且每幣每根只選一個：
+原 40 根／0.25 ATR 突破優先，其次 `SNR-5M-RETEST-1`，再其次
+`SNR-5M-FAST-1`。Fast 使用前 20 根高低點、0.10 ATR 突破緩衝，
+仍需收盤 K 線方向及 EMA50 趨勢同向。Retest 尋找最近 1–3 根內
+首次突破前 20 根區間後的回踩／回抽，區間固定於突破前；觸及
+0.20 ATR 容許區後收盤須重新站回 0.05 ATR，且不能穿越超過 1 ATR。
+兩種新策略都只使用已收盤 K 線，沿用 2R 目標、結構停損與倉位計算。
+版本使用不同委託雜湊前綴，無法更名重用原委託；帳戶仍僅一筆活動交易。
+進度的 `selected_strategy` 區分來源。`--strategy-profile original` 可比較原策略。
+此旗標只作用於 20 幣掃描；單幣／強制連線測試維持原流程。
+
+`node strategy/demo-compare.mjs --public` 唯讀取得五大幣最近約 600 根
+公開 5 分鐘 K 線，逐幣獨立比較 original／fast／retest／expanded。
+回放以次根開盤進場、單邊 0.05% 手續費、0.02% 滑價及同根停損優先計算；
+不模擬交易所最小口數／價格精度，也不是共享帳戶投資組合或獲利預測。
+2026-10-18 樣本及原始 K 線保留在
+`strategy/research/demo-compare-20261018.json`，可離線重現。
+有效區間約 43 小時，各幣獨立回放成交合計 original 56 筆、expanded 89 筆。
+該樣本 expanded 五幣淨損益皆負，因此目前僅作模擬流程及頻率實驗。
+沒有保證每次 15 分鐘試跑都有訊號或交易。
+候選的價格偏離、停損距離不符或最小口數無法負擔，會分別回報
+`signal_price_drift`、`signal_stop_distance`、`minimum_size_not_funded` 並略過；
+不建立委託或重設帳本。帳戶證據／租約等異常仍依原流程停機。
+
 Scanner progress splits `no_signal` into `breakout_not_met`, `trend_not_met`,
 `warmup`, and `invalid_stop`. Their sum must equal `no_signal`; `expired` and
 `prestart` remain separate. Counts describe the current scan, not unique trade

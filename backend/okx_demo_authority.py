@@ -15,7 +15,7 @@ from okx_demo_intent import demo_plan
 from okx_instruments import instrument_spec
 from okx_reconcile import number
 from okx_risk import positive
-from okx_strategy_bridge import timestamp,execution_test_signal_id
+from okx_strategy_bridge import timestamp,execution_test_signal_id,STRATEGY_PREFIXES
 
 
 def day_key(now):
@@ -232,7 +232,7 @@ class DemoEntryAuthority:
         if testing and (not self.execution_test_enabled or body['instId']!='BTC-USDT-SWAP'
                 or body['side']!='buy' or candidate.get('signal_id')!=execution_test_signal_id(cycle) or plan.get('purpose')!='execution_test'):
             raise ValueError('Execution test not enabled')
-        if (candidate.get("account_scope") != self.scope or candidate.get("strategy") not in {"SNR-5M-1","DEMO-EXECUTION-TEST-1"}
+        if (candidate.get("account_scope") != self.scope or candidate.get("strategy") not in {*STRATEGY_PREFIXES,"DEMO-EXECUTION-TEST-1"}
                 or candidate["symbol"] != snapshot["symbol"] or body["instId"] != snapshot["symbol"] or plan.get("environment") != "demo"
                 or plan.get("submission_enabled") is not False or candidate.get("submission_enabled") is not False
                 or candidate["expires_at_ms"] < now
@@ -247,7 +247,7 @@ class DemoEntryAuthority:
             side = 1 if body["side"] == "buy" else -1
             entry = anchor * (1 + side * Decimal("0.0002"))
             bracket = body["attachAlgoOrds"][0]
-            recalculated = demo_plan(account_scope=self.scope, signal_id=("DEMO-EXECUTION-TEST-1:" if testing else "SNR5M1:") + candidate["signal_id"],
+            recalculated = demo_plan(account_scope=self.scope, signal_id=("DEMO-EXECUTION-TEST-1" if testing else STRATEGY_PREFIXES[candidate['strategy']])+":" + candidate["signal_id"],
                 instrument=snapshot["instrument"], side=body["side"], contracts=qty,
                 price=anchor, stop=bracket["slTriggerPx"], target=bracket["tpTriggerPx"],
                 equity_usdt=equity, leverage=snapshot["isolated_leverage"], demo=True)

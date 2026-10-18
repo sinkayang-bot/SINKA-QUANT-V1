@@ -11,6 +11,7 @@ from okx_instruments import instrument_spec
 from okx_risk import positive
 
 VERSION = "SNR-5M-1"
+STRATEGY_PREFIXES={VERSION:'SNR5M1', 'SNR-5M-FAST-1':'SNR5MFAST1','SNR-5M-RETEST-1':'SNR5MRETEST1'}
 BAR_MS = 300000
 
 
@@ -40,7 +41,7 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
     The runtime must bind sources to the correct account and strategy symbol.
     Startup rejects signals already confirmed when the worker started.
     """
-    if demo is not True or strategy_version != VERSION:
+    if demo is not True or strategy_version not in STRATEGY_PREFIXES:
         raise ValueError("Explicit demo and supported strategy required")
     if not isinstance(signal, dict) or not isinstance(quote, dict):
         raise ValueError("Signal and quote objects required")
@@ -112,11 +113,11 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
         contracts = align(min(caps.values()), spec["lot_sz"], ROUND_FLOOR)
         if contracts <= 0 or contracts < spec["min_sz"]:
             raise ValueError("Risk budget cannot fund the minimum contract size")
-        planned = demo_plan(account_scope=account_scope, signal_id="SNR5M1:" + signal["id"],
+        planned = demo_plan(account_scope=account_scope, signal_id=STRATEGY_PREFIXES[strategy_version]+":" + signal["id"],
             instrument=instrument, side="buy" if side == 1 else "sell",
             contracts=contracts, price=anchor, stop=stop, target=target,
             equity_usdt=equity, leverage=lev, demo=True)
-        return {"plan": planned, "strategy": VERSION, "symbol": symbol, "account_scope": account_scope,
+        return {"plan": planned, "strategy": strategy_version, "symbol": symbol, "account_scope": account_scope,
                 "signal_id": signal["id"], "signal_ready_at_ms": ready,
                 "expires_at_ms": min(ready + 20000, quote_time + 15000,
                                      balance_received_at_ms + 5000, instrument_received_at_ms + 60000),

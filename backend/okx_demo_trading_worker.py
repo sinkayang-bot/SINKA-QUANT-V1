@@ -23,6 +23,7 @@ from okx_demo_trading_session import DemoTradingSession,outcome
 from okx_demo_trading_supervisor import DemoTradingSupervisor
 from okx_demo_trading_transport import OKXDemoTradingTransport
 from okx_demo_transport import DemoCredentials,OKXDemoReadTransport
+from okx_strategy_bridge import STRATEGY_PREFIXES
 
 REQUIRED=('OKX_API_KEY','OKX_API_SECRET','OKX_API_PASSPHRASE','OKX_EXPECTED_UID','DEMO_ACCOUNT_SCOPE','DEMO_LEDGER_PATH')
 
@@ -30,7 +31,7 @@ REQUIRED=('OKX_API_KEY','OKX_API_SECRET','OKX_API_PASSPHRASE','OKX_EXPECTED_UID'
 class DemoProgress:
     """Report fixed labels only; never serialize account or upstream data."""
     GATE_REASONS=frozenset({'daily_risk_halt','daily_entry_limit','risk_cooldown',
-        'account_or_plan_verification'})
+        'account_or_plan_verification','signal_price_drift','signal_stop_distance','minimum_size_not_funded'})
     PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
         'native_protection_verified_monitor_required','kill_switch_active',
         'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
@@ -60,6 +61,8 @@ class DemoProgress:
             self.last_entry_block=gate|{'ticks':sum(self.counts.values())}
             if result.get('selected_symbol') in SYMBOLS:
                 self.last_entry_block['selected_symbol']=result['selected_symbol']
+            if result.get('selected_strategy') in STRATEGY_PREFIXES:
+                self.last_entry_block['selected_strategy']=result['selected_strategy']
         status_key=(phase,gate.get('gate_reason'),result.get('selected_symbol') if result.get('selected_symbol') in SYMBOLS else None)
         if self.enabled and (status_key!=self.previous or sum(self.counts.values())%6==0):
             try:
@@ -73,6 +76,8 @@ class DemoProgress:
                         'warmup','invalid_stop'} and type(v) is int and 0<=v<=20}
                 if result.get('selected_symbol') in SYMBOLS:
                     payload['selected_symbol']=result['selected_symbol']
+                if result.get('selected_strategy') in STRATEGY_PREFIXES:
+                    payload['selected_strategy']=result['selected_strategy']
                 print(json.dumps(payload,sort_keys=True,separators=(',',':')),flush=True)
             except OSError:
                 pass
@@ -89,7 +94,8 @@ async def run_supervisor(supervisor,env):
             arm_entries=env.get('DEMO_ARM_ENTRIES')=='1',resume_idle=env.get('DEMO_RESUME_IDLE')=='1',on_status=progress)
         return result|{'tick_counts':dict(progress.counts),'ticks_observed':sum(progress.counts.values()),
             'entry_gate_counts':dict(progress.gate_counts),'last_entry_block':progress.last_entry_block,
-            'daily_limits_enabled':supervisor.session.authority.daily_limits_enabled}
+            'daily_limits_enabled':supervisor.session.authority.daily_limits_enabled,
+            'strategy_profile':getattr(supervisor.source,'profile','original')}
     finally:
         for signum in installed: loop.remove_signal_handler(signum)
 
@@ -135,7 +141,7 @@ def execute(environ=None):
         lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
         session=DemoTradingSession(lifecycle,reader,enabled=True,enable_execution_test=execution_test)
         reconciliation=DemoReconciliationRunner(lifecycle,read_reader,enabled=True)
-        supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner() if multi else DemoStrategySource(execution_test=execution_test),enabled=True,
+        supervisor=DemoTradingSupervisor(session,reconciliation,DemoMarketScanner(profile=env.get('DEMO_STRATEGY_PROFILE','original')) if multi else DemoStrategySource(execution_test=execution_test),enabled=True,
             max_seconds=duration,poll_seconds=poll,scan_markets=multi,execution_test=execution_test,recover_only=recover_only)
         result=asyncio.run(run_supervisor(supervisor,env))
         clean=((recover_only and result.get('flat_verified') is True) or (execution_test and result.get('test_roundtrip_verified') is True) or result['phase']=='verified_but_not_armed' or
