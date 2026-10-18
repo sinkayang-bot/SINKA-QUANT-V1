@@ -116,7 +116,7 @@ class PublicUniverseTests(unittest.TestCase):
         script=r'''
         import assert from 'node:assert/strict';
         import {eligibleMarkets,scanMarkets} from './strategy/demo-market-scan.mjs';
-        import {SYMBOLS} from './strategy/snr-engine.mjs';
+        import {SCAN_SYMBOLS as SYMBOLS} from './strategy/demo-market-scan.mjs';
         const now=1800000301000, started=now-2000;
         const ins=SYMBOLS.map(instId=>({instId,instType:'SWAP',state:'live',ctType:'linear',settleCcy:'USDT',
           ctValCcy:instId.split('-')[0],listTime:String(now-100*86400000),ctVal:'1',lotSz:'1',minSz:'1',
@@ -151,9 +151,12 @@ class PublicUniverseTests(unittest.TestCase):
         assert.equal(calls,42);assert.ok(max<=8);
         const old=await scanMarkets({startedAt:now,fetcher,clock:()=>now});
         assert.equal(old.sources.length,0);assert.equal(old.scan.prestart,20);
+        console.log(JSON.stringify(SYMBOLS));
         '''
         result=subprocess.run(['node','--input-type=module','-e',script],cwd=Path(__file__).resolve().parents[2],capture_output=True,text=True,timeout=15)
         self.assertEqual(result.returncode,0,result.stderr)
+        from okx_risk import SYMBOLS
+        self.assertEqual(set(json.loads(result.stdout)),set(SYMBOLS))
 
 
 class RestartMarketTests(unittest.TestCase):

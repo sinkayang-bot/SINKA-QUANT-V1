@@ -1,9 +1,10 @@
 // Public GETs only. Eligibility means liquidity screening, not price stability.
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {SYMBOLS,RULES,analyze} from './snr-engine.mjs';
-import {createMarketClient,validateSnapshot} from './public-market.mjs';
-import {sourceFromSnapshot} from './demo-signal.mjs';
+import {RULES,analyze} from './snr-engine.mjs';
+import {parseCandles,validateSnapshot} from './public-market.mjs';
+export const SCAN_SYMBOLS=Object.freeze(['BTC','ETH','SOL','XRP','DOGE','ADA','AVAX','LINK','DOT','LTC','BCH','TRX','TON','SUI','NEAR','APT','ATOM','UNI','ETC','FIL'].map(x=>x+'-USDT-SWAP'));
+const SYMBOLS=SCAN_SYMBOLS;
 
 export function eligibleMarkets(instruments,tickers,now) {
   if(!Array.isArray(instruments)||!Array.isArray(tickers)||instruments.length>5000||tickers.length>5000)throw Error('Invalid inventory');
@@ -37,7 +38,7 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
   const [instruments,tickers]=await Promise.all([
     inventory('/api/v5/public/instruments',{instType:'SWAP'},fetcher,signal),
     inventory('/api/v5/market/tickers',{instType:'SWAP'},fetcher,signal)]);
-  const markets=eligibleMarkets(instruments,tickers,clock()),client=createMarketClient(fetcher),sources=[];
+  const markets=eligibleMarkets(instruments,tickers,clock()),sources=[];
   const scan={universe:SYMBOLS.length,eligible:markets.length,checked:0,no_signal:0,expired:0,prestart:0,fetch_failed:0,signals:0};
   let cursor=0;
   async function worker(){
@@ -45,12 +46,18 @@ export async function scanMarkets({startedAt,fetcher=fetch,clock=Date.now}){
       const index=cursor++;if(index>=markets.length)return;
       const {symbol}=markets[index];
       try{
-        const snapshot=await client.snapshot(symbol,signal),now=clock();validateSnapshot(snapshot,now);
+        const [candles,quotes]=await Promise.all([
+          inventory('/api/v5/market/candles',{instId:symbol,bar:'5m',limit:'100'},fetcher,signal),
+          inventory('/api/v5/market/ticker',{instId:symbol},fetcher,signal)]);
+        if(quotes.length!==1||quotes[0]?.instId!==symbol)throw Error('Invalid ticker');
+        const snapshot={bars:parseCandles(candles),price:Number(quotes[0].last),quoteTs:Number(quotes[0].ts)};
+        const now=clock();validateSnapshot(snapshot,now);
         const result=analyze(snapshot.bars);scan.checked++;
         if(result.reason!=='signal'){scan.no_signal++;continue;}
         if(result.readyAt<=startedAt){scan.prestart++;continue;}
-        const source=sourceFromSnapshot(snapshot,{symbol,startedAt,now});
-        if(!source){scan.expired++;continue;}
+        if(now-result.readyAt>RULES.signalAgeMs||snapshot.quoteTs>now){scan.expired++;continue;}
+        const source={strategy_version:RULES.version,signal:result,
+          quote:{symbol,price:String(snapshot.price),ts:snapshot.quoteTs}};
         sources.push({source,index});
       }catch{scan.fetch_failed++;}
     }
