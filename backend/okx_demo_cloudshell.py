@@ -267,6 +267,7 @@ def main(argv=None):
     modes=parser.add_mutually_exclusive_group()
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--run',action='store_true')
+    modes.add_argument('--audit-trade',action='store_true',help='GET-only review of the retained test, manual close, fees and cash')
     parser.add_argument('--initialize-baseline',action='store_true')
     parser.add_argument('--recover-only',action='store_true',help='Recover the existing tracked intent without any new entry')
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
@@ -276,7 +277,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     result=dict(mode='demo_cloudshell_acceptance',phase='plan',secret_values_printed=False,
                 cloud_resources_changed=False,orders_enabled=False,live_trading_enabled=False)
-    if not args.check and not args.run:
+    if not args.check and not args.run and not args.audit_trade:
         print(json.dumps(result,sort_keys=True)); return 0
     try:
         if sys.version_info<(3,11) or not hasattr(asyncio,'TaskGroup') or not hasattr(asyncio,'timeout'):
@@ -284,8 +285,16 @@ def main(argv=None):
         root=Path.home()/'sinka-demo-trial'
         persistent_storage(root)  # Reject ephemeral storage before reading any Secret.
         creds=credentials()
-        binding,flat=prepare(root,creds,require_binding=args.run,recovery_only=args.recover_only and args.run)
-        if args.check:
+        binding,flat=prepare(root,creds,require_binding=args.run or args.audit_trade,recovery_only=args.recover_only and args.run)
+        if args.audit_trade:
+            from okx_demo_manual_review import audit_trade
+            try:
+                review=asyncio.run(audit_trade(root/'ledger.sqlite',binding,creds))
+            except Exception:
+                raise SetupBlocked('manual_trade_evidence_unavailable_ledger_preserved') from None
+            result.update(phase=review['phase'],review=review)
+            code=0 if review['evidence_matches'] else 2
+        elif args.check:
             result.update(phase='demo_account_verified',account_binding_pinned=True,
                           trade_permission_verified=True,flat_clean=flat,persistent_storage_verified=True)
             code=0
