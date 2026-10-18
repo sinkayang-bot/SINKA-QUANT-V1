@@ -33,6 +33,7 @@ class DemoProgress:
     GATE_REASONS=frozenset({'daily_risk_halt','daily_entry_limit','risk_cooldown',
         'account_or_plan_verification','signal_price_drift','signal_stop_distance','minimum_size_not_funded'})
     PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
+        'blocked_reconciliation_required',
         'native_protection_verified_monitor_required','kill_switch_active',
         'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
         'exit_unknown_no_retry','cancel_unconfirmed_no_retry',

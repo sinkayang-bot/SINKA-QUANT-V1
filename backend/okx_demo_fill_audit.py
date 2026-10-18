@@ -249,7 +249,9 @@ class DemoFillAuditor:
                 anchor = max(fills, key=lambda k:int(fills[k]["billId"])) if fills else None
                 revision = meta[4]+1
                 self.db.execute("UPDATE demo_fill_audit_meta SET last_checked=?,anchor=?,revision=? WHERE singleton=1", (now, anchor, revision))
-                verified = self._certify(snapshot, now, revision)
+                # Owned-position monitoring is never an entry permission. Its
+                # receipt must not be mistaken for a new flat cash/bill proof.
+                verified = self._certify(dict(snapshot,recovery_only=True) if owned else snapshot, now, revision)
                 self.db.execute("COMMIT")
             except Exception:
                 self.db.execute("ROLLBACK")

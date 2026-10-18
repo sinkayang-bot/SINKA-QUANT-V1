@@ -23,6 +23,26 @@ from okx_demo_transport import OKXDemoReadTransport
 from okx_instruments import instrument_spec
 
 
+def legacy_strategy_spec(saved,instrument):
+    """Bind old entries lacking a per-entry spec to their immutable loss model.
+
+    This is only used after exact full fills/bills/cash reconciliation, not for
+    new admission or native-exit attribution. No original record is rewritten.
+    """
+    plan=saved['original_plan']; body=plan['body']; bracket=body['attachAlgoOrds'][0]
+    spec=instrument_spec(instrument)
+    if spec['symbol']!=body['instId']: raise ValueError('Legacy contract symbol mismatch')
+    with localcontext() as ctx:
+        ctx.prec=60
+        qty=Decimal(body['sz']); stop=Decimal(bracket['slTriggerPx']); target=Decimal(bracket['tpTriggerPx'])
+        anchor=(target+2*stop)/3; direction=1 if body['side']=='buy' else -1
+        entry=anchor*(1+direction*Decimal('.0002')); stopped=stop*(1-direction*Decimal('.0002'))
+        expected=qty*spec['ct_val']*(abs(entry-stopped)+(entry+stopped)*Decimal('.0005'))
+        if expected!=Decimal(plan['modeled_loss_usdt']):
+            raise ValueError('Legacy contract differs from original fee-inclusive loss model')
+    return 'original_plan_loss_model_and_full_cash_fills'
+
+
 class ManualCloseBlocked(RuntimeError):
     def __init__(self,stage):
         super().__init__('Manual close blocked at '+stage)
@@ -38,7 +58,7 @@ class ManualTestLifecycle(DemoCycleLifecycle):
             state=self.verify_archive_chain()
             self.authority._owner(now)
             if not self.authority._owner(now)[5]: raise ValueError('Entries must remain halted')
-            if retained_in_transaction(self.db,self.authority.scope)!=saved:
+            if retained_in_transaction(self.db,self.authority.scope,allow_strategy=saved.get('strategy_trade') is True)!=saved:
                 raise ValueError('Retained test changed during reads')
             fills=self._snapshot(snapshot,now)
             begin,through=bills['begin_ms'],bills['through_ms']
@@ -50,8 +70,16 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 raise ValueError('Fresh original full bill window required')
             report=assess(saved,dict(snapshot=snapshot,bills=bills),entry,closing)
             if not report['evidence_matches']: raise ValueError('Manual close does not reconcile')
+            strategy=saved.get('strategy_trade') is True
+            if strategy and not report['automatic_exit_verified']:
+                raise ValueError('Strategy review requires its exact durable automatic reduction')
             context=self.db.execute('SELECT spec FROM demo_close_context WHERE singleton=1').fetchone()
-            if not context or context[0]!=spec_digest(snapshot['instrument']):
+            bound=self.db.execute('SELECT spec FROM demo_entry_context WHERE client_id=?',(saved['client'],)).fetchone()
+            if bound: context=bound
+            spec_source='saved_entry_specification' if bound else 'original_baseline_specification'
+            if strategy and not bound:
+                spec_source=legacy_strategy_spec(saved,snapshot['instrument'])
+            elif not context or context[0]!=spec_digest(snapshot['instrument']):
                 raise ValueError('Original contract specification changed')
             client=saved['client']
             if (not self.db.execute('SELECT 1 FROM demo_risk_entry WHERE id=?',(client,)).fetchone()
@@ -87,6 +115,7 @@ class ManualTestLifecycle(DemoCycleLifecycle):
                 closure_source='tracked_emergency_exit' if report['automatic_exit_verified'] else 'manual_test_close',
                 automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
                 test_roundtrip_verified=report['test_roundtrip_verified'],strategy_performance_sample=False,
+                instrument_context_source=spec_source,strategy_trade=strategy,
                 account_bills_audited=True,funding_audited=True,new_entry_allowed=False,submission_enabled=False,
                 close_evidence=dict(entry=entry,closing=closing,report=report,snapshot=snapshot,bills=bills,reduction_record=saved.get('reduction')))
             trade=dict(settlement,entry_order_id=saved['order_id'],child_order_id=closing['ordId'],
@@ -94,23 +123,26 @@ class ManualTestLifecycle(DemoCycleLifecycle):
             self.db.execute('INSERT INTO demo_closed_trade VALUES(?,?,?)',(client,closing['ordId'],encoded(trade)))
             self.db.execute('INSERT INTO demo_trade_settlement VALUES(?,?)',(client,encoded(settlement)))
             self.authority._record_close_in_transaction('settled:'+client,pnl_usdt=settlement['net_usdt'],
-                closed_at_ms=closed,audit_verified=True)
+                closed_at_ms=closed,audit_verified=True,allow_historical=True)
             result=self._archive_settled_in_transaction(snapshot,bills,now,settlement,state)
             finished=self.authority._now()
-            daily=self.db.execute('SELECT loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(finished),)).fetchone()
+            daily=self.db.execute('SELECT loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(closed),)).fetchone()
             cooldown=max(0,daily[2]-finished+999)//1000
             self.db.execute('COMMIT')
-            return dict(phase='tracked_test_exit_closed_and_archived' if report['automatic_exit_verified'] else 'manual_test_closed_and_archived',sequence=result['sequence'],
+            return dict(phase='tracked_strategy_exit_closed_and_archived' if strategy else ('tracked_test_exit_closed_and_archived' if report['automatic_exit_verified'] else 'manual_test_closed_and_archived'),sequence=result['sequence'],
                 ledger_archived=True,daily_risk_preserved=True,new_entry_allowed=False,
+                risk_day=day_key(closed),
                 cooldown_remaining_seconds=cooldown,risk_halted=bool(daily[0]>=3 or daily[1]),
                 automatic_exit_verified=report['automatic_exit_verified'],native_protection_verified=report['native_protection_verified'],
-                test_roundtrip_verified=report['test_roundtrip_verified'],orders_sent=0,net_usdt=settlement['net_usdt'])
+                test_roundtrip_verified=report['test_roundtrip_verified'],strategy_trade=strategy,
+                instrument_context_source=spec_source,strategy_performance_sample=False,
+                orders_sent=0,net_usdt=settlement['net_usdt'])
         except Exception:
             self.db.execute('ROLLBACK')
             raise
 
 
-async def close_test(path,binding,creds):
+async def close_test(path,binding,creds,*,allow_strategy=False):
     if not path.is_file() or path.is_symlink(): raise ValueError('Original ledger required')
     clock=lambda:int(time.time()*1000)
     journal=DemoExecutionJournal(path)
@@ -122,7 +154,7 @@ async def close_test(path,binding,creds):
         if not owner.acquire(): raise ValueError('Another worker owns ledger')
         owner.set_kill_switch(True)
         stage='retained_test'
-        saved=retained_in_transaction(journal.db,owner.scope)
+        saved=retained_in_transaction(journal.db,owner.scope,allow_strategy=allow_strategy)
         transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
         reader=DemoSnapshotReader(transport,account_scope=owner.scope,expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
         start=clock()

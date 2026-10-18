@@ -17,17 +17,18 @@ from okx_demo_fill_audit import encoded, key, money, normalize_fill
 from okx_demo_settlement import scan
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
+from okx_demo_protection import _plan_body
 
 
-def retained_test(path, scope):
+def retained_test(path, scope,*,allow_strategy=False):
     # mode=ro and query_only prohibit ledger changes, including schema creation.
     with closing(sqlite3.connect(path.resolve().as_uri()+'?mode=ro', uri=True)) as db:
         db.execute('PRAGMA query_only=ON')
         db.execute('BEGIN')
-        return retained_in_transaction(db,scope)
+        return retained_in_transaction(db,scope,allow_strategy=allow_strategy)
 
 
-def retained_in_transaction(db,scope):
+def retained_in_transaction(db,scope,*,allow_strategy=False):
     rows=db.execute('SELECT i.id,i.plan,e.exchange_order_id FROM demo_intent i '
         'JOIN demo_execution e ON e.id=i.id WHERE i.dispatched=1').fetchall()
     meta=db.execute('SELECT scope,baseline_at FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
@@ -36,13 +37,19 @@ def retained_in_transaction(db,scope):
     if len(rows)!=1 or not meta or meta[0]!=scope or not cash:
         raise ValueError('Original single test and baseline required')
     client, raw, order_id=rows[0]; plan=json.loads(raw)
-    if (plan.get('purpose')!='execution_test' or plan.get('environment')!='demo'
+    strategy=plan.get('purpose') is None and allow_strategy is True
+    if strategy:
+        _plan_body(plan)
+        if not db.execute('SELECT 1 FROM demo_risk_entry WHERE id=?',(client,)).fetchone():
+            raise ValueError('Consumed strategy reservation required')
+    if ((not strategy and plan.get('purpose')!='execution_test') or plan.get('environment')!='demo'
             or plan.get('headers')!={'x-simulated-trading':'1'}
-            or plan['body'].get('clOrdId')!=client or plan['body'].get('instId')!='BTC-USDT-SWAP'
+            or plan['body'].get('clOrdId')!=client or (not strategy and plan['body'].get('instId')!='BTC-USDT-SWAP')
             or not order_id):
         raise ValueError('Retained acknowledged BTC demo test required')
     result=dict(client=client,body=plan['body'],order_id=order_id,
                 begin=meta[1],cash=money(cash[0]),baseline=baseline)
+    if strategy: result.update(strategy_trade=True,original_plan=plan)
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_emergency_exit'").fetchone():
         reduction=db.execute('SELECT client_id,body,exchange_order_id FROM demo_emergency_exit WHERE entry_id=?',(client,)).fetchone()
         if reduction:
@@ -157,6 +164,9 @@ def assess(saved, bundle, entry, closing):
     report['automatic_exit_verified']=tracked and report['evidence_matches']
     report['native_protection_verified']=type(saved.get('native_protection_observed_at_ms')) is int and report['evidence_matches']
     report['test_roundtrip_verified']=report['automatic_exit_verified'] and report['native_protection_verified']
+    if saved.get('strategy_trade') is True:
+        report['reduction_roundtrip_verified']=report['test_roundtrip_verified']
+        report['test_roundtrip_verified']=False
     if tracked:
         report['phase']='tracked_exit_evidence_matches' if report['evidence_matches'] else 'tracked_exit_review_required'
     return report
@@ -190,7 +200,7 @@ def protection_detail(saved,response):
 
 
 async def audit_trade(path, binding, creds):
-    saved=retained_test(path,binding['account_scope'])
+    saved=retained_test(path,binding['account_scope'],allow_strategy=True)
     clock=lambda:int(time.time()*1000)
     transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
     reader=DemoSnapshotReader(transport,account_scope=binding['account_scope'],expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)

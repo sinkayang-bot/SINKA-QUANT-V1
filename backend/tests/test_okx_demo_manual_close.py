@@ -65,6 +65,61 @@ class ManualCloseTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.close()
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
 
+    def strategy_reduction(self,legacy=False):
+        plan=json.loads(self.db.execute('SELECT plan FROM demo_intent').fetchone()[0]);plan.pop('purpose')
+        self.db.execute('UPDATE demo_intent SET plan=?',(json.dumps(plan),))
+        self.db.execute('CREATE TABLE demo_emergency_exit(entry_id TEXT PRIMARY KEY,client_id TEXT UNIQUE,body TEXT,status TEXT,exchange_order_id TEXT)')
+        self.closing['clOrdId']='sr'+'c'*28
+        body={k:self.closing[k] for k in ('instId','tdMode','posSide','side','ordType','sz','clOrdId')};body['reduceOnly']=True
+        self.db.execute('INSERT INTO demo_emergency_exit VALUES(?,?,?,?,?)',
+            (self.saved['client'],self.closing['clOrdId'],json.dumps(body),'acknowledged',self.closing['ordId']))
+        if legacy:
+            self.db.execute('DELETE FROM demo_entry_context')
+            self.db.execute("UPDATE demo_close_context SET spec='different-bootstrap-market'")
+        self.saved=retained_in_transaction(self.db,self.t.authority.scope,allow_strategy=True)
+
+    def test_tracked_strategy_reduction_uses_entry_spec_and_preserves_original_trade(self):
+        self.strategy_reduction()
+        result=self.close()
+        self.assertEqual(result['phase'],'tracked_strategy_exit_closed_and_archived')
+        self.assertTrue(result['automatic_exit_verified'])
+        self.assertEqual(result['instrument_context_source'],'saved_entry_specification')
+        self.assertFalse(result['strategy_performance_sample'])
+        archive=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive').fetchone()[0])
+        self.assertTrue(archive['settlement']['strategy_trade'])
+        self.assertEqual(len(archive['records']['demo_entry_context']['rows']),1)
+
+    def test_legacy_strategy_reduction_revalidates_original_model_not_other_market_baseline(self):
+        self.strategy_reduction(legacy=True)
+        result=self.close()
+        self.assertTrue(result['ledger_archived'])
+        self.assertEqual(result['instrument_context_source'],'original_plan_loss_model_and_full_cash_fills')
+
+    def test_late_strategy_settlement_records_original_day_without_resetting_history(self):
+        from okx_demo_authority import day_key
+        self.strategy_reduction(legacy=True); original_day=day_key(self.t.now)
+        self.t.now+=86400000
+        self.t.authority.acquire();self.t.authority.set_kill_switch(True)
+        self.snapshot.update(received_at_ms=self.t.now,scan_finished_at_ms=self.t.now)
+        self.bills.update(through_ms=self.t.now,received_at_ms=self.t.now)
+        self.bills['query']['end']=str(self.t.now)
+        result=self.close()
+        self.assertTrue(result['ledger_archived']);self.assertEqual(result['risk_day'],original_day)
+        self.assertEqual(self.db.execute('SELECT day,entries FROM demo_daily').fetchall(),[(original_day,1)])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+
+    def test_strategy_cannot_adopt_untracked_close_or_changed_contract_model(self):
+        self.strategy_reduction(legacy=True)
+        original=deepcopy(self.closing);self.closing['clOrdId']=''
+        with self.assertRaises(ValueError): self.close()
+        self.closing=original
+        plan=json.loads(self.db.execute('SELECT plan FROM demo_intent').fetchone()[0]);plan['modeled_loss_usdt']='99999'
+        self.db.execute('UPDATE demo_intent SET plan=?',(json.dumps(plan),))
+        self.saved=retained_in_transaction(self.db,self.t.authority.scope,allow_strategy=True)
+        with self.assertRaises(ValueError): self.close()
+        self.assertIsNone(self.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+        self.assertIsNotNone(self.db.execute('SELECT 1 FROM demo_intent').fetchone())
+
     def test_failure_during_archive_rolls_back_settlement_and_risk(self):
         before=self.records()
         with patch.object(self.lifecycle,'_baseline_metadata',side_effect=ValueError('injected failure')):

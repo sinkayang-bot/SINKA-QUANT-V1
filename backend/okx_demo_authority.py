@@ -175,7 +175,7 @@ class DemoEntryAuthority:
             tail=self.db.execute("SELECT sequence,hash FROM demo_cycle_archive ORDER BY sequence DESC LIMIT 1").fetchone()
             if state is None or (state[0]==0 and tail is not None) or (state[0]>0 and tail!=(state[0],state[2])):
                 raise ValueError("Cycle checkpoint does not match archive")
-            if state[0]>0:
+            if state[0]>0 and snapshot.get('recovery_only') is not True:
                 proof=self.db.execute("SELECT sequence,epoch,session,snapshot_hash FROM demo_cycle_entry_receipt WHERE singleton=1").fetchone()
                 if (not proof or proof[:3]!=(state[0],self.epoch,self.session) or proof[3]!=snapshot_digest(snapshot)):
                     raise ValueError("Current cycle cash/bill receipt required")
@@ -301,18 +301,22 @@ class DemoEntryAuthority:
                 or json.loads(stored[0]) != candidate["plan"]):
             raise ValueError("Reserved plan differs from approved candidate")
         self.db.execute("INSERT INTO demo_risk_entry VALUES(?,?,?,?)", (client_id, day_key(now), self.epoch, self.session))
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_entry_context'").fetchone():
+            spec=json.dumps({k:str(v) for k,v in instrument_spec(self.snapshot['instrument']).items()},sort_keys=True,separators=(',',':'))
+            self.db.execute('INSERT INTO demo_entry_context VALUES(?,?)',(client_id,spec))
         self.db.execute("UPDATE demo_daily SET entries=entries+1 WHERE day=?", (day_key(now),))
         self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
 
-    def _record_close_in_transaction(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False):
+    def _record_close_in_transaction(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False,allow_historical=False):
         if not self.db.in_transaction:
             raise ValueError("Atomic close transaction required")
         if audit_verified is not True or not isinstance(close_id, str) or not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", close_id):
             raise ValueError("Audited close identity required")
         now = self._now()
         closed = timestamp(closed_at_ms)
-        if closed > now or day_key(closed) != day_key(now):
+        if type(allow_historical) is not bool or closed>now or (day_key(closed)!=day_key(now) and (not allow_historical or now-closed>604800000)):
             raise ValueError("Current-day completed close required")
+        settlement_day=day_key(closed)
         pnl = number(pnl_usdt, allow_negative=True)
         self._owner(now)
         old = self.db.execute("SELECT pnl,closed_at FROM demo_risk_close WHERE id=?", (close_id,)).fetchone()
@@ -320,13 +324,18 @@ class DemoEntryAuthority:
             if Decimal(old[0]) != pnl or old[1] != closed:
                 raise ValueError("Close identity reused with changed values")
         else:
-            daily = self.db.execute("SELECT loss_streak,cooldown,last_close FROM demo_daily WHERE day=?", (day_key(now),)).fetchone()
+            daily = self.db.execute("SELECT loss_streak,cooldown,last_close FROM demo_daily WHERE day=?", (settlement_day,)).fetchone()
             if daily is None or closed < daily[2]:
                 raise ValueError("Close chronology or daily baseline missing")
             streak = daily[0] + 1 if pnl < 0 else 0
             self.db.execute("INSERT INTO demo_risk_close VALUES(?,?,?)", (close_id, str(pnl), closed))
             self.db.execute("UPDATE demo_daily SET loss_streak=?,halt=MAX(halt,?),cooldown=?,last_close=? WHERE day=?",
-                (streak, int(streak >= 3), max(daily[1], closed+900000), closed, day_key(now)))
+                (streak, int(streak >= 3), max(daily[1], closed+900000), closed, settlement_day))
+            if settlement_day!=day_key(now):
+                # Preserve a midnight-spanning cooldown if today's accounting
+                # row already exists; yesterday's loss streak stays yesterday.
+                self.db.execute('UPDATE demo_daily SET cooldown=MAX(cooldown,?),last_close=MAX(last_close,?) WHERE day=?',
+                    (closed+900000,closed,day_key(now)))
         self.db.execute("UPDATE demo_authority SET last_clock=? WHERE singleton=1", (now,))
 
     def record_verified_close(self, close_id, *, pnl_usdt, closed_at_ms, audit_verified=False):

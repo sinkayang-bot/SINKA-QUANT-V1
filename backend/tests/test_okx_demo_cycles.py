@@ -265,6 +265,13 @@ class CycleTests(unittest.TestCase):
         opened=self.t.now; gross=Decimal(q)*Decimal('0.01')
         entry=self.t.fill(billId='201',tradeId='301',ordId='12346',fillSz=q,fee='-0.1')
         exit=self.t.fill(billId='202',tradeId='302',ordId='556',side='sell',fillSz=q,fillPx='102',fee='-0.2',fillPnl=str(gross))
+        # Real monitoring after a previous archive needs a new owned-position
+        # receipt, not the old flat-cycle entry receipt.
+        monitoring,_=self.idle(); monitoring['recent_fills'].append(entry)
+        monitoring['positions']=[dict(instId='BTC-USDT-SWAP',pos=q,posSide='net',mgnMode='isolated')]
+        proof=self.cycles.audit(monitoring); owner.accept_snapshot(proof)
+        self.assertTrue(proof['recovery_only'])
+        self.assertFalse(owner.allows(candidate))
         snap,_=self.idle(); snap['recent_fills'] += [entry,exit]
         bracket=broker.body['attachAlgoOrds'][0]
         algo=dict(algoId='445',algoClOrdId=bracket['attachAlgoClOrdId'],instId='BTC-USDT-SWAP',instType='SWAP',

@@ -13,7 +13,7 @@ from okx_demo_settlement import DemoSettlementAuditor,scan
 from okx_demo_reads import bill_route
 from okx_strategy_bridge import timestamp
 
-CYCLE_TABLES=('demo_intent','demo_execution','demo_fill_audit_meta','demo_audit_fills',
+CYCLE_TABLES=('demo_intent','demo_execution','demo_entry_context','demo_fill_audit_meta','demo_audit_fills',
     'demo_close_context','demo_cash_baseline','demo_account_bill','demo_closed_trade',
     'demo_trade_settlement','demo_audit_receipt')
 

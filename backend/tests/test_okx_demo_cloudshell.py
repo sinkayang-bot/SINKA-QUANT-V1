@@ -36,6 +36,21 @@ def test_manual_close_mode_never_starts_order_worker(monkeypatch,capsys):
     assert 'composite_exchange_reads' in json.loads(capsys.readouterr().out)['reason']
 
 
+def test_strategy_close_mode_is_explicit_and_never_starts_order_worker(monkeypatch,capsys):
+    import okx_demo_manual_close as close
+    monkeypatch.setattr(setup,'persistent_storage',lambda root:None)
+    monkeypatch.setattr(setup,'credentials',lambda:object())
+    monkeypatch.setattr(setup,'prepare',lambda *a,**k:({'account_scope':'scope'},True))
+    monkeypatch.setattr(setup,'execute',lambda *a,**k:pytest.fail('Order worker called'))
+    async def done(*args,**kwargs):
+        assert kwargs=={'allow_strategy':True}
+        return dict(phase='tracked_strategy_exit_closed_and_archived',orders_sent=0)
+    monkeypatch.setattr(close,'close_test',done)
+    assert setup.main(['--close-reviewed-trade'])==0
+    result=json.loads(capsys.readouterr().out)
+    assert result['orders_enabled'] is False and result['closure']['orders_sent']==0
+
+
 def test_fixed_secret_versions_are_pinned_and_values_are_not_printed(monkeypatch):
     calls=[]
     def command(args):

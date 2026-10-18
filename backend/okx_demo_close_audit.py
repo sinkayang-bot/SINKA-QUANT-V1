@@ -68,6 +68,7 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
         super().__init__(authority)
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_close_context ('
             'singleton INTEGER PRIMARY KEY CHECK(singleton=1),spec TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS demo_entry_context (client_id TEXT PRIMARY KEY,spec TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_closed_trade ('
             'client_id TEXT PRIMARY KEY,child_id TEXT UNIQUE NOT NULL,body TEXT NOT NULL)')
 
@@ -85,6 +86,10 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
         self._snapshot(snapshot,current)
         meta=self.db.execute('SELECT baseline_at,last_checked,anchor,revision FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
         context=self.db.execute('SELECT spec FROM demo_close_context WHERE singleton=1').fetchone()
+        bound=self.db.execute('SELECT c.spec FROM demo_entry_context c JOIN demo_intent i ON i.id=c.client_id WHERE i.dispatched=1').fetchall()
+        if bound:
+            if len(bound)!=1: raise ValueError('One entry specification required')
+            context=bound[0]
         if (not meta or not context or context[0] != spec_digest(snapshot['instrument'])
                 or not 0 <= now-meta[1] <= MAX_AUDIT_GAP_MS
                 or (meta[2] is not None and meta[2] not in incoming)):
