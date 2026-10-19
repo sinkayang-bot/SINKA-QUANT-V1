@@ -11,6 +11,7 @@ import httpx
 import test_okx_demo_settlement as fixtures
 from test_okx_demo_close_reader import CloseFixture
 from okx_demo_reconciliation import DemoReconciliationRunner
+from okx_demo_bill_reader import DemoBillReadError
 from okx_demo_cycles import DemoCycleLifecycle
 from okx_demo_executor import DemoExecutionJournal
 from okx_demo_authority import DemoEntryAuthority
@@ -72,6 +73,54 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
         self.assertTrue(all(r.method=='GET' for r in self.f.calls))
         self.assertNotIn('private',json.dumps(result)); self.assertNotIn('123456',json.dumps(result))
+
+    def test_idle_transient_read_recovers_with_fresh_bundle(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        original=self.runner.bill_reader.collect
+        calls=[]
+        async def transient(**kwargs):
+            calls.append(1)
+            if len(calls)<3:
+                raise DemoBillReadError('private-response',stage='snapshot_before',
+                    kind='validation_failed',snapshot_stage='snapshot_consistency')
+            return await original(**kwargs)
+        with patch.object(self.runner.bill_reader,'collect',side_effect=transient):
+            self.assertEqual(self.run_once()['phase'],'idle_verified')
+        self.assertEqual(len(calls),3)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+
+    def test_idle_persistent_timeout_is_bounded_and_invalidates_readiness(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        error=DemoBillReadError('secret',stage='snapshot_after',kind='timeout')
+        with patch.object(self.runner.bill_reader,'collect',side_effect=error) as collect:
+            result=self.run_once()
+        self.assertEqual(collect.call_count,3)
+        self.assertEqual(result['read_attempts'],3)
+        self.assertEqual(result['failure_kind'],'timeout')
+        self.assertEqual(result['recovery_stage'],'idle_read')
+        self.assertEqual(result['read_stage'],'snapshot_after')
+        self.assertFalse(result['new_entry_allowed'])
+        self.assertIsNone(self.t.authority.snapshot)
+        self.assertNotIn('secret',json.dumps(result))
+
+    def test_account_validation_failure_is_never_retried(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        error=DemoBillReadError('private',stage='snapshot_before',
+            kind='validation_failed',snapshot_stage='account_config')
+        with patch.object(self.runner.bill_reader,'collect',side_effect=error) as collect:
+            result=self.run_once()
+        self.assertEqual(collect.call_count,1)
+        self.assertEqual(result['snapshot_stage'],'account_config')
+        self.assertEqual(result['phase'],'blocked')
+
+    def test_ledger_transition_failure_is_not_retried(self):
+        with patch.object(self.t.audit,'_advance_cycle_in_transaction',side_effect=ValueError('private')) as advance:
+            result=self.run_once()
+        self.assertEqual(advance.call_count,1)
+        self.assertEqual(result['recovery_stage'],'closed_commit')
+        self.assertEqual(result['read_attempts'],1)
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
 
     def test_disabled_runner_and_disabled_transition_never_reach_http(self):
         self.runner.enabled=False
