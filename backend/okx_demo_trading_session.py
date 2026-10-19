@@ -18,7 +18,7 @@ from okx_demo_cycles import DemoCycleLifecycle,unresolved_emergency_exit
 from okx_demo_executor import receipt
 from okx_demo_protection import assess_recovery
 from okx_demo_manual_review import protection_detail
-from okx_demo_snapshot import DemoSnapshotReader
+from okx_demo_snapshot import DemoSnapshotReader, DemoSnapshotError
 from okx_demo_trading_transport import OKXDemoTradingTransport
 from okx_demo_transport import DEMO_HEADERS
 from okx_demo_authority import day_key
@@ -200,16 +200,22 @@ class DemoTradingSession:
         return {k:v for k,v in snapshot.items() if k not in {
             'received_at_ms','scan_finished_at_ms','equity_usdt','available_usdt'}}
 
-    async def _evidence(self,client_id):
-        # Retry only pre-mutation GET consistency races with completely fresh
-        # evidence each time. Never retry dispatch, cancellation or reduction.
+    async def _consistent_read(self, operation):
+        # Only pre-mutation consistency failures may restart complete GET reads.
+        # Do not retry order dispatch, cancel, reduction, identity or permission failures.
         for attempt in range(3):
             try:
-                return await self._evidence_once(client_id)
-            except RecoveryConsistencyError:
+                return await operation()
+            except (RecoveryConsistencyError, DemoSnapshotError) as error:
+                if isinstance(error, DemoSnapshotError) and (
+                        error.stage != 'snapshot_consistency' or error.kind != 'validation_failed'):
+                    raise
                 self.recovery_diagnostics['read_attempts']=attempt+1
                 if attempt==2: raise
                 await asyncio.sleep(0.25)
+
+    async def _evidence(self,client_id):
+        return await self._consistent_read(lambda:self._evidence_once(client_id))
 
     async def _evidence_once(self,client_id):
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
@@ -351,6 +357,9 @@ class DemoTradingSession:
         return outcome('exit_acknowledged_query_required' if order_id else 'exit_unknown_no_retry')
 
     async def _query_exit(self,record):
+        return await self._consistent_read(lambda:self._query_exit_once(record))
+
+    async def _query_exit_once(self,record):
         self.recovery_stage='exit_query'
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
         client_id,encoded,expected_id=record
@@ -368,7 +377,7 @@ class DemoTradingSession:
         values=self._recovery_values
         if (self._owner()-start>5000 or values(before)!=values(after) or first!=second
                 or first.get('code')!='0' or len(first.get('data',[]))!=1):
-            raise ValueError('Exit query unavailable or inconsistent')
+            raise RecoveryConsistencyError('Exit query unavailable or inconsistent')
         raw=first['data'][0]; order=parse_order(raw)
         self.recovery_stage='exit_identity'
         if (order.client_order_id!=client_id or order.instrument!=body['instId']

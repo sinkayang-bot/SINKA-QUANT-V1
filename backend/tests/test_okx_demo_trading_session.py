@@ -10,7 +10,8 @@ import httpx
 from okx_demo_authority import DemoEntryAuthority
 from okx_demo_cycles import DemoCycleLifecycle
 from okx_demo_executor import DemoExecutionJournal
-from okx_demo_snapshot import DemoSnapshotReader
+from okx_demo_snapshot import DemoSnapshotReader, DemoSnapshotError
+from unittest.mock import patch
 from okx_demo_trading_session import DemoTradingSession
 from okx_demo_trading_transport import OKXDemoTradingTransport
 from okx_demo_transport import DemoCredentials,DemoTransportError
@@ -128,6 +129,58 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lookups,4)
         self.assertEqual(len(self.f.posts),1)
         self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_emergency_exit').fetchone())
+
+    async def test_snapshot_consistency_race_rechecks_entire_entry_evidence(self):
+        original=self.session._evidence_once
+        count=0
+        async def transient(key):
+            nonlocal count
+            count+=1
+            if count<3:
+                raise DemoSnapshotError('private',stage='snapshot_consistency',kind='validation_failed')
+            return await original(key)
+        with patch.object(self.session,'_evidence_once',side_effect=transient):
+            result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(count,3)
+        self.assertEqual(len(self.f.posts),1)
+
+    async def test_exit_confirmation_retries_reads_without_resending_reduction(self):
+        self.f.mode='unprotected'
+        self.assertEqual((await self.session.enter(args()))['phase'],'exit_acknowledged_query_required')
+        original=self.session._query_exit_once
+        count=0
+        async def transient(record):
+            nonlocal count
+            count+=1
+            if count==1:
+                raise DemoSnapshotError('private',stage='snapshot_consistency',kind='validation_failed')
+            return await original(record)
+        with patch.object(self.session,'_query_exit_once',side_effect=transient):
+            result=await self.session.recover(self.key())
+        self.assertEqual(result['phase'],'flat_requires_emergency_settlement_review')
+        self.assertEqual(count,2)
+        self.assertEqual(len(self.f.posts),2)
+
+    async def test_persistent_exit_snapshot_change_is_bounded_and_never_resubmits(self):
+        self.f.mode='unprotected'
+        await self.session.enter(args())
+        with patch.object(self.session,'_query_exit_once',side_effect=DemoSnapshotError(
+                'private',stage='snapshot_consistency',kind='validation_failed')) as read:
+            result=await self.session.recover(self.key())
+        self.assertEqual(read.call_count,3)
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(len(self.f.posts),2)
+
+    async def test_exit_account_validation_is_never_retried(self):
+        self.f.mode='unprotected'
+        await self.session.enter(args())
+        with patch.object(self.session,'_query_exit_once',side_effect=DemoSnapshotError(
+                'private',stage='account_config',kind='validation_failed')) as read:
+            result=await self.session.recover(self.key())
+        self.assertEqual(read.call_count,1)
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(len(self.f.posts),2)
 
     async def test_order_lookup_difference_reports_fixed_consistency_checks(self):
         lookups=0
