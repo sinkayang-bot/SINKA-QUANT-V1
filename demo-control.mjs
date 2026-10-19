@@ -7,16 +7,31 @@ export function controlBase(value) {
   return url.origin;
 }
 export function createDemoControl({getUser,fetcher=fetch,onChange=()=>{}}) {
-  let base='',pending=false,version=0;
+  let base='',pending=null,version=0;
   const emit=value=>onChange(value);
   return {
-    configure(value){base=controlBase(value);version++;emit({phase:'configured'});},
-    clear(){base='';version++;pending=false;emit({phase:'signed_out'});},
+    configure(value){
+      const next=controlBase(value);
+      if(next===base)return;
+      base=next;version++;pending=null;emit({phase:'configured'});
+    },
+    clear(){base='';version++;pending=null;emit({phase:'signed_out'});},
     async request(action=null){
-      if(pending)throw new Error('request_pending');
       const user=getUser();if(!user || !base)throw new Error('login_and_service_required');
       if(action && !['start','stop','recover','audit','settle'].includes(action))throw new Error('unsupported_action');
-      const epoch=version,destination=base;pending=true;
+      const epoch=version,destination=base;
+      if(pending){
+        // Polls skip an existing request. One user command can wait for a GET,
+        // but another command is never queued or automatically replayed.
+        if(!action)return;
+        if(pending.action)throw new Error('command_in_progress');
+        await pending.done;
+        if(epoch!==version || getUser()!==user)return;
+        if(pending)throw new Error('command_in_progress');
+      }
+      let release;
+      const current={action,done:new Promise(resolve=>release=resolve)};
+      pending=current;
       try {
         const token=await user.getIdToken();
         if(epoch!==version || getUser()!==user) return;
@@ -30,7 +45,7 @@ export function createDemoControl({getUser,fetcher=fetch,onChange=()=>{}}) {
         if(!action && (value.mode!=='okx_demo_control' || value.live_trading_enabled!==false))throw new Error('invalid_demo_response');
         emit(action?{phase:'command_accepted',action,...value}:{phase:'status',status:value});
         return value;
-      } finally {if(epoch===version)pending=false;}
+      } finally {if(pending===current)pending=null;release();}
     }
   };
 }

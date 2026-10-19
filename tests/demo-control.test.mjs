@@ -29,3 +29,39 @@ test('stale responses cannot restore signed-out state',async()=>{
  resolve({ok:true,json:async()=>({mode:'okx_demo_control',live_trading_enabled:false})});await request;
  assert.equal(states.at(-1).phase,'signed_out');
 });
+const statusResponse=()=>({ok:true,json:async()=>({mode:'okx_demo_control',live_trading_enabled:false})});
+test('reconnecting during a poll never strands the request lock',async()=>{
+ let release;let calls=0;
+ const user={getIdToken:async()=>'synthetic-token'};
+ const session=createDemoControl({getUser:()=>user,fetcher:async()=>{
+  calls++;if(calls===1)return new Promise(r=>release=r);return statusResponse();}});
+ session.configure(base);const poll=session.request();await Promise.resolve();
+ session.configure(base);await session.request();assert.equal(calls,1);
+ release(statusResponse());await poll;await session.request();assert.equal(calls,2);
+});
+test('a command waits for the active poll and sends exactly once',async()=>{
+ let release;const calls=[];const user={getIdToken:async()=>'synthetic-token'};
+ const session=createDemoControl({getUser:()=>user,fetcher:async(url,opts)=>{
+  calls.push(opts.method);if(calls.length===1)return new Promise(r=>release=r);
+  return {ok:true,json:async()=>({accepted:true})};}});
+ session.configure(base);const poll=session.request();await Promise.resolve();
+ const command=session.request('start');assert.deepEqual(calls,['GET']);
+ release(statusResponse());await Promise.all([poll,command]);assert.deepEqual(calls,['GET','POST']);
+});
+test('a waiting command is discarded if the owner logs out',async()=>{
+ let release;const calls=[];const user={getIdToken:async()=>'synthetic-token'};
+ const session=createDemoControl({getUser:()=>user,fetcher:async(url,opts)=>{
+  calls.push(opts.method);return new Promise(r=>release=r);}});
+ session.configure(base);const poll=session.request();await Promise.resolve();
+ const command=session.request('start');session.clear();release(statusResponse());
+ await Promise.all([poll,command]);assert.deepEqual(calls,['GET']);
+});
+test('an in-flight command is neither duplicated nor replayed by polling',async()=>{
+ let release;let calls=0;const user={getIdToken:async()=>'synthetic-token'};
+ const session=createDemoControl({getUser:()=>user,fetcher:async()=>{
+  calls++;return new Promise(r=>release=r);}});
+ session.configure(base);const command=session.request('start');await Promise.resolve();
+ await assert.rejects(session.request('start'),/command_in_progress/);
+ await session.request();assert.equal(calls,1);
+ release({ok:true,json:async()=>({accepted:true})});await command;
+});
