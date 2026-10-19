@@ -102,6 +102,7 @@ def run(store,*,seconds=3600):
     os.chmod(root/'control-runner.lock',0o600)
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     runner=uuid.uuid4().hex;generation=store.acquire(runner)
+    print(json.dumps({'phase':'runner_connected','live_trading_enabled':False,'trading_started':False}),flush=True)
     child=None;request_id=None;stopping=False;deadline=time.monotonic()+seconds
     def stop(*unused):
         nonlocal stopping

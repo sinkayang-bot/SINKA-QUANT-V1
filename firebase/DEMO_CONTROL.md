@@ -20,7 +20,14 @@ or turn offline unit results into exchange acceptance.
 
 ## Authorized deployment (creates billable resources)
 
-Run from the repository root in the existing authorized Cloud Shell:
+One-time combined deployment and runner connection, from the existing authorized
+Cloud Shell checkout root:
+
+```bash
+bash firebase/connect-demo-control.sh --approved
+```
+
+Or deploy separately:
 
 ```bash
 python3 firebase/deploy-demo-control.py --approved
