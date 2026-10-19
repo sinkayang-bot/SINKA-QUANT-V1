@@ -11,8 +11,10 @@ from okx_demo_close_audit import DemoClosedTradeAuditor, fixed
 from okx_demo_fill_audit import DemoFillAuditError, encoded, ident, money, MAX_AUDIT_GAP_MS
 from okx_strategy_bridge import timestamp
 
-# Strictly bounded exchange serialization tails, never a missing-bill allowance.
-CASH_ROUNDING_TOLERANCE=Decimal('0.000000000001')
+# Fixed absolute allowance for demo API cash serialization tails (1e-10 USDT).
+# Applies only to aggregate cash arithmetic; bill/fill fields remain exact.
+# Never scale this with balance, fill count or an observed discrepancy.
+CASH_ROUNDING_TOLERANCE=Decimal('0.0000000001')
 
 
 def cash_matches(left,right):

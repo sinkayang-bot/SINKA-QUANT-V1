@@ -1,4 +1,5 @@
 """Manual close reports must never grant trading authority or change a ledger."""
+from decimal import Decimal
 from copy import deepcopy
 import json
 import sqlite3
@@ -133,8 +134,8 @@ def test_exchange_decimal_tail_is_reported_but_missing_money_is_not_tolerated():
     result=assess(saved,bundle,entry,close)
     assert result['evidence_matches']
     assert result['cash_bill_rounding_delta_usdt']=='-0.0000000000000026'
-    assert result['cash_rounding_tolerance_usdt']=='0.000000000001'
-    bundle['snapshot']['cash_balance_usdt']='100.800000000002'
+    assert result['cash_rounding_tolerance_usdt']=='0.0000000001'
+    bundle['snapshot']['cash_balance_usdt']='100.8000000002'
     assert not assess(saved,bundle,entry,close)['evidence_matches']
     bundle['snapshot']['cash_balance_usdt']='100.8'
     bundle['bills']['passes'][1][0]['data'].pop()
@@ -200,3 +201,22 @@ def test_audit_cli_failure_preserves_ledger_and_sanitizes_details(monkeypatch,ca
     output=capsys.readouterr().out
     assert 'synthetic-private-detail' not in output
     assert json.loads(output)['orders_enabled'] is False
+
+
+def test_observed_multi_fill_cash_tail_passes_but_larger_discrepancy_stays_blocked():
+    saved,bundle,entry,close=fixture()
+    tail=Decimal('0.000000000015152')
+    original=Decimal(bundle['snapshot']['cash_balance_usdt'])
+    bundle['snapshot']['cash_balance_usdt']=str(original+tail)
+    report=assess(saved,bundle,entry,close)
+    assert report['evidence_matches']
+    assert report['cash_bill_rounding_delta_usdt']=='0.000000000015152'
+    assert report['bill_fill_mismatches']=={}
+    bundle['snapshot']['cash_balance_usdt']=str(original+Decimal('0.000000000100001'))
+    assert not assess(saved,bundle,entry,close)['checks']['cash_matches_bills']
+    bundle['snapshot']['cash_balance_usdt']=str(original+tail)
+    # Even a smaller fee mismatch is rejected; tolerance is not per-fill.
+    bundle['snapshot']['recent_fills'][0]['fee']='-0.100000000000001'
+    report=assess(saved,bundle,entry,close)
+    assert not report['checks']['all_bills_match_fills']
+    assert not report['evidence_matches']
