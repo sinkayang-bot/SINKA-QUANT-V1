@@ -17,9 +17,23 @@ SERVICE='sinka-okx-demo-control'
 DATABASE='sinka-demo-control'
 
 
+class CloudCommandError(RuntimeError):
+    def __init__(self,args,code,stderr):
+        kinds=('PERMISSION_DENIED','NOT_FOUND','UNAUTHENTICATED','INVALID_ARGUMENT',
+            'SERVICE_DISABLED','RESOURCE_EXHAUSTED','ALREADY_EXISTS','FAILED_PRECONDITION')
+        kind=next((value for value in kinds if value in stderr),'unavailable')
+        if 'unrecognized arguments' in stderr:kind='unsupported_cli_arguments'
+        elif 'not currently have an active account' in stderr or 'reauthentication' in stderr.lower():kind='google_login_required'
+        elif 'billing' in stderr.lower():kind='billing_configuration_required'
+        elif 'does not exist' in stderr.lower() or 'could not be found' in stderr.lower():kind='NOT_FOUND'
+        self.kind=kind
+        self.diagnostic={'operation':' '.join(args[:3]),'exit_code':code,'kind':kind}
+        super().__init__('Cloud operation failed')
+
+
 def command(*args):
     result=subprocess.run(['gcloud',*args,'--project',PROJECT],capture_output=True,text=True)
-    if result.returncode:raise RuntimeError('gcloud operation failed; inspect Cloud Console operation logs')
+    if result.returncode:raise CloudCommandError(args,result.returncode,result.stderr)
     return result.stdout.strip()
 
 
@@ -51,15 +65,21 @@ def deploy():
     env=existing['spec']['template']['spec']['containers'][0]['env']
     owner=next((row.get('value','') for row in env if row.get('name')=='SINKA_OWNER_UID'),'')
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',owner):raise RuntimeError('Existing owner binding required')
+    print('stage: enable_control_apis',flush=True)
     command('services','enable','firestore.googleapis.com','firebaserules.googleapis.com',
         'run.googleapis.com','artifactregistry.googleapis.com','cloudbuild.googleapis.com','identitytoolkit.googleapis.com')
+    print('stage: inspect_control_database',flush=True)
     try:command('firestore','databases','describe','--database',DATABASE,'--format=value(name)')
-    except RuntimeError:
+    except CloudCommandError as error:
+        if error.kind!='NOT_FOUND':raise
+        print('stage: create_control_database',flush=True)
         command('firestore','databases','create','--database',DATABASE,'--location',REGION,'--type=firestore-native','--delete-protection')
     print('stage: lock_named_database',flush=True);rules()
     sa=f'{SERVICE}@{PROJECT}.iam.gserviceaccount.com'
     try:command('iam','service-accounts','describe',sa)
-    except RuntimeError:command('iam','service-accounts','create',SERVICE,'--display-name=SINKA demo command API (no exchange secrets)')
+    except CloudCommandError as error:
+        if error.kind!='NOT_FOUND':raise
+        command('iam','service-accounts','create',SERVICE,'--display-name=SINKA demo command API (no exchange secrets)')
     command('projects','add-iam-policy-binding',PROJECT,'--member=serviceAccount:'+sa,
         '--role=roles/datastore.user',
         '--condition=expression=resource.name=="projects/'+PROJECT+'/databases/'+DATABASE+'",title=sinka_demo_control_only', '--quiet')
@@ -104,4 +124,14 @@ if __name__=='__main__':
     args=parser.parse_args()
     if not args.approved:parser.exit(2,'Deployment requires explicit --approved; creates billed Cloud resources.\n')
     try:deploy()
-    except Exception:parser.exit(2,'Deployment stopped. No trading was started. Inspect the last stage and Cloud Console logs.\n')
+    except CloudCommandError as error:
+        print(json.dumps({'phase':'deployment_blocked','diagnostic':error.diagnostic,'live_trading_enabled':False}),flush=True)
+        parser.exit(2,'Deployment stopped; no trading was started.\n')
+    except urllib.error.HTTPError as error:
+        print(json.dumps({'phase':'deployment_blocked','http_status':error.code,'live_trading_enabled':False}),flush=True)
+        parser.exit(2,'Google API verification failed; no trading was started.\n')
+    except Exception as error:
+        label=type(error).__name__
+        if label not in {'KeyError','ValueError','FileNotFoundError','RuntimeError','TimeoutError'}:label='unavailable'
+        print(json.dumps({'phase':'deployment_blocked','failure_kind':label,'live_trading_enabled':False}),flush=True)
+        parser.exit(2,'Deployment stopped; no trading was started.\n')

@@ -15,6 +15,14 @@ command -v node >/dev/null
   exit 2
 }
 "$python" -m pip install --quiet 'google-cloud-firestore>=2.20,<3'
+# Read-only metadata determines whether the prior bounded trial left an intent.
+active="$("$python" -c 'import sqlite3,pathlib; p=pathlib.Path.home()/"sinka-demo-trial/ledger.sqlite"; d=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True); d.execute("PRAGMA query_only=ON"); print(d.execute("SELECT COUNT(*) FROM demo_intent").fetchone()[0]); d.close()')"
+if [[ "$active" != 0 ]]; then
+  echo 'stage: recover_existing_demo_trade (no new entry)'
+  "$python" "$root/backend/okx_demo_cloudshell.py" --run --recover-only --scan-markets 20 --seconds 90
+  "$python" "$root/backend/okx_demo_cloudshell.py" --audit-trade
+  "$python" "$root/backend/okx_demo_cloudshell.py" --close-reviewed-trade
+fi
 python3 "$root/firebase/deploy-demo-control.py" --approved
 echo 'Control API deployed. Connecting runner for one hour; no trade starts until an owner command is received.'
 exec "$python" "$root/backend/okx_demo_control_runner.py" --connect --seconds 3600
