@@ -1,3 +1,4 @@
+import {mountDemoControl} from './demo-control.mjs?v=control-1';
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
 import {createStatusSession} from './readonly-session.mjs?v=clear-1';
 import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=clear-1';
@@ -23,6 +24,7 @@ const messages = {
   invalid_result: '結果未通過完整核對，目前無法確認連線。',
 };
 let auth, sdk, authBusy = false;
+const demoControl=mountDemoControl({getUser:()=>auth?.currentUser});
 let assetsSession;
 const diagnosticOutput = $('owner-diagnostic-output'), diagnosticNotice = $('owner-diagnostic-notice');
 if ($('owner-version')) $('owner-version').textContent = '介面版本：' + FRONTEND_VERSION;
@@ -64,6 +66,7 @@ function syncRefreshButtons() {
   }
 }
 function renderUser(user) {
+  if(!user)demoControl?.clear();
   account.textContent = user ? 'Google 已登入' : '尚未登入';
   login.hidden = Boolean(user); logout.hidden = !user;
   session.setUser(user);

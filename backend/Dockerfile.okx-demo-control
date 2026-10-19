@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir "fastapi>=0.115,<1" "uvicorn>=0.30,<1" "firebase-admin>=6.5,<8" "google-cloud-firestore>=2.20,<3"
+COPY firebase_auth.py okx_demo_control_store.py okx_demo_control_app.py ./
+ENV PYTHONUNBUFFERED=1
+CMD ["sh", "-c", "exec uvicorn okx_demo_control_app:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log"]

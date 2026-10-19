@@ -4,13 +4,11 @@ on:
   push:
     paths:
       - 'backend/**'
-      - 'strategy/snr-engine.mjs'
       - 'firebase/deploy-okx-smoke-job.sh'
       - '.github/workflows/backend-tests.yml'
   pull_request:
     paths:
       - 'backend/**'
-      - 'strategy/snr-engine.mjs'
       - 'firebase/deploy-okx-smoke-job.sh'
       - '.github/workflows/backend-tests.yml'
 permissions:
@@ -23,9 +21,6 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -90,7 +85,7 @@ jobs:
           java-version: '21'
       - run: pip install -r backend/requirements.txt pytest
       - run: npm install --no-save firebase-tools
-      - run: npx firebase emulators:exec --project sinka-emulator --only firestore "cd backend && python -m pytest -q tests/test_lease_emulator.py tests/test_okx_firestore_emulator.py tests/test_okx_journal_emulator.py tests/test_okx_position_emulator.py tests/test_okx_fill_watermark_emulator.py --junitxml=pytest-firestore.xml"
+      - run: npx firebase emulators:exec --project sinka-emulator --only firestore "cd backend && python -m pytest -q tests/test_lease_emulator.py tests/test_okx_firestore_emulator.py tests/test_okx_journal_emulator.py tests/test_okx_position_emulator.py tests/test_okx_fill_watermark_emulator.py tests/test_okx_demo_control_emulator.py --junitxml=pytest-firestore.xml"
         timeout-minutes: 10
       - name: Upload Firestore emulator report
         if: always()
@@ -110,3 +105,14 @@ jobs:
         run: >-
           docker run --rm --network none --entrypoint python sinka-okx-status:ci
           -c "import okx_status_app; assert okx_status_app.app.openapi_url is None; print('Isolated status API imported without credentials')"
+
+  demo-control-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build owner-only demo command API without exchange modules
+        run: docker build -f backend/Dockerfile.okx-demo-control -t sinka-demo-control:ci backend
+      - name: Import without credentials or networking
+        run: >-
+          docker run --rm --network none --entrypoint python sinka-demo-control:ci
+          -c "import okx_demo_control_app; from pathlib import Path; assert not Path('okx_demo_cloudshell.py').exists(); assert okx_demo_control_app.app.openapi_url is None"
