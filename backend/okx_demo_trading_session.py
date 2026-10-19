@@ -32,6 +32,10 @@ def outcome(phase):
                 automatic_runtime_ready=False,live_trading_enabled=False)
 
 
+class RecoveryConsistencyError(ValueError):
+    pass
+
+
 class DemoTradingSession:
     def __init__(self,lifecycle,reader,*,enabled=False,enable_execution_test=False):
         if (not isinstance(lifecycle,DemoCycleLifecycle) or not isinstance(reader,DemoSnapshotReader)
@@ -197,6 +201,17 @@ class DemoTradingSession:
             'received_at_ms','scan_finished_at_ms','equity_usdt','available_usdt'}}
 
     async def _evidence(self,client_id):
+        # Retry only pre-mutation GET consistency races with completely fresh
+        # evidence each time. Never retry dispatch, cancellation or reduction.
+        for attempt in range(3):
+            try:
+                return await self._evidence_once(client_id)
+            except RecoveryConsistencyError:
+                self.recovery_diagnostics['read_attempts']=attempt+1
+                if attempt==2: raise
+                await asyncio.sleep(0.25)
+
+    async def _evidence_once(self,client_id):
         if not self.authority.acquire(): raise ValueError('Recovery lease unavailable')
         tracked=self.journal.tracked(client_id)
         plan=json.loads(tracked[0]); body=plan['body']
@@ -215,10 +230,13 @@ class DemoTradingSession:
         self.recovery_stage='evidence_consistency'
         now=self._owner()
         value=self._recovery_values
-        if (now-start>5000 or value(before)!=value(after) or first!=second
-                or first.get('code')!='0' or len(first.get('data',[]))!=1
-                or before.get('order_permission_verified') is not True):
-            raise ValueError('Changing or unverified recovery snapshot')
+        checks=dict(within_deadline=0<=now-start<=5000,
+            snapshot_stable=value(before)==value(after),order_lookup_stable=first==second,
+            order_lookup_valid=first.get('code')=='0' and len(first.get('data',[]))==1,
+            permission_verified=before.get('order_permission_verified') is True)
+        self.recovery_diagnostics={'consistency_checks':checks}
+        if not all(checks.values()):
+            raise RecoveryConsistencyError('Changing or unverified recovery snapshot')
         raw=first['data'][0]; parsed=parse_order(raw)
         if tracked[3] is not None and parsed.order_id!=tracked[3]:
             raise ValueError('Order receipt identity mismatch')

@@ -115,6 +115,37 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.f.posts),1)
         self.assertEqual(self.journal.db.execute('SELECT entries FROM demo_daily').fetchone()[0],1)
 
+    async def test_transient_lookup_race_rechecks_without_new_order_or_exit(self):
+        lookups=0
+        def changing(request):
+            nonlocal lookups
+            if request.url.path.endswith('/order') and self.f.row:
+                lookups+=1
+                self.f.row['ordId']='99999' if lookups==1 else '12345'
+        self.f.request_hook=changing
+        result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(lookups,4)
+        self.assertEqual(len(self.f.posts),1)
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_emergency_exit').fetchone())
+
+    async def test_order_lookup_difference_reports_fixed_consistency_checks(self):
+        lookups=0
+        def changing(request):
+            nonlocal lookups
+            if request.url.path.endswith('/order') and self.f.row:
+                lookups+=1
+                self.f.row['ordId']=str(12345+lookups)
+        self.f.request_hook=changing
+        result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        checks=result['protection_diagnostics']['consistency_checks']
+        self.assertFalse(checks['order_lookup_stable'])
+        self.assertTrue(checks['snapshot_stable'])
+        self.assertTrue(checks['within_deadline'])
+        self.assertEqual(len(self.f.posts),1)
+        self.assertNotIn('synthetic-key',str(result))
+
     async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
         result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
