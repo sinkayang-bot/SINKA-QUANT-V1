@@ -101,6 +101,12 @@ class ControlTests(unittest.TestCase):
             self.assertNotIn('shell',kwargs)
             self.assertEqual(kwargs['pass_fds'],(123,))
             self.assertEqual(args[0][-1],'900')
+
+    def test_idle_audit_diagnostic_survives_control_report_without_raw_error(self):
+        value=safe_report({'worker':{'phase':'blocked','audit_stage':'archived_idle_window',
+            'failure_kind':'validation_failed','raw_error':'secret account details'}})
+        self.assertEqual(value['worker']['audit_stage'],'archived_idle_window')
+        self.assertNotIn('secret',str(value))
     def test_api_denies_missing_auth_and_wrong_owner_and_disabled(self):
         app=create_app(self.store);client=TestClient(app)
         with patch.dict(os.environ,{'SINKA_OWNER_UID':'synthetic-owner','SINKA_DEMO_CONTROL':'true'}):

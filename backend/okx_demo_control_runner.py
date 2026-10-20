@@ -18,7 +18,7 @@ import time
 import uuid
 from okx_demo_control_store import FirestoreControlStore
 
-SCALARS=frozenset({'phase','stop_reason','recovery_stage','failure_kind','read_stage','snapshot_stage','selected_symbol',
+SCALARS=frozenset({'phase','stop_reason','recovery_stage','audit_stage','failure_kind','read_stage','snapshot_stage','selected_symbol',
     'selected_strategy','strategy_profile','reason','gate_reason','mode','instrument_context_source'})
 NUMBERS=frozenset({'ticks','ticks_observed','sequence','read_attempts','pending_algo_count','heartbeat_at',
     'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals','excluded',

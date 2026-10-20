@@ -12,10 +12,22 @@ from okx_demo_fill_audit import DemoFillAuditError,MAX_AUDIT_GAP_MS,encoded,mone
 from okx_demo_settlement import DemoSettlementAuditor,scan
 from okx_demo_reads import bill_route
 from okx_strategy_bridge import timestamp
+from okx_demo_read_errors import failure_kind
 
 CYCLE_TABLES=('demo_intent','demo_execution','demo_entry_context','demo_fill_audit_meta','demo_audit_fills',
     'demo_close_context','demo_cash_baseline','demo_account_bill','demo_closed_trade',
     'demo_trade_settlement','demo_audit_receipt')
+
+# Stay below the recent-fill endpoint's three-day retention. Archived idle
+# recovery still requires the original anchor, exact cash and two empty bill scans.
+ARCHIVED_IDLE_RESUME_MS = 48 * 60 * 60 * 1000
+
+
+class DemoIdleAuditError(DemoFillAuditError):
+    def __init__(self, stage, kind='validation_failed'):
+        super().__init__('Idle cycle audit incomplete; entry remains blocked')
+        self.audit_stage = stage
+        self.kind = kind
 
 
 def digest(body):
@@ -142,9 +154,9 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
             return self._untouched_gap(meta,state,now)
         # Resume only the idle baseline created by a verified archive. Never
         # replace that baseline, erase risk, or adopt activity during the gap.
-        if (meta[0]!=state[2] or not 0<=now-meta[0]<=43200000
-                or not MAX_AUDIT_GAP_MS<now-meta[1]<=43200000):
-            raise ValueError('Bounded archived idle baseline required')
+        if (meta[0]!=state[2] or not 0<=now-meta[0]<=ARCHIVED_IDLE_RESUME_MS
+                or not MAX_AUDIT_GAP_MS<now-meta[1]<=ARCHIVED_IDLE_RESUME_MS):
+            raise DemoIdleAuditError('archived_idle_window')
         latest=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive WHERE sequence=?',(state[0],)).fetchone()[0])
         if money(latest['verification']['cash_usdt'])!=cash:
             raise ValueError('Archived cash baseline mismatch')
@@ -158,12 +170,17 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
 
     def audit_idle(self,snapshot,bills,*,resume_idle=False):
         """Renew readiness only with empty current-cycle bills and unchanged cash."""
+        stage='idle_lease'
         try:
             now=self._begin_attempt()
             self.db.execute('BEGIN IMMEDIATE')
             try:
-                self.authority._owner(now); fills=self._snapshot(snapshot,now)
+                self.authority._owner(now)
+                stage='idle_snapshot'
+                fills=self._snapshot(snapshot,now)
+                stage='idle_archive_chain'
                 state=self.verify_archive_chain()
+                stage='idle_baseline'
                 meta=self.db.execute('SELECT baseline_at,last_checked,anchor,revision FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
                 cash=self.db.execute('SELECT cash FROM demo_cash_baseline WHERE singleton=1').fetchone()
                 if type(resume_idle) is not bool:
@@ -173,13 +190,17 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
                     raise ValueError('Current idle cycle required')
                 gap=now-meta[1]>MAX_AUDIT_GAP_MS
                 if gap:
+                    stage='idle_resume'
                     if not resume_idle: raise ValueError('Continuous audit or explicit recovery required')
                     self._idle_gap(meta,state,now,cash[0])
+                stage='idle_inventory'
                 if snapshot['pending_orders'] or snapshot['pending_algos'] or any(Decimal(p['pos'])!=0 for p in snapshot['positions']):
                     raise ValueError('Account must stay flat and clean')
+                stage='idle_fills'
                 for identity,fill in fills.items():
                     row=self.db.execute('SELECT body,baseline FROM demo_audit_fills WHERE identity=?',(identity,)).fetchone()
                     if row is None or row!=(encoded(fill),1): raise ValueError('Unknown or changed idle fill')
+                stage='idle_bill_window'
                 begin=timestamp(bills['begin_ms']); through=timestamp(bills['through_ms']); received=timestamp(bills['received_at_ms'])
                 if (bills.get('demo_verified') is not True or bills.get('account_scope')!=self.authority.scope
                         or begin!=meta[0] or through!=snapshot['received_at_ms'] or not through<=received<=now or now-received>5000
@@ -187,9 +208,13 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
                     raise ValueError('Fresh account-wide idle bill interval required')
                 bill_route(begin,through)
                 passes=bills['passes']
-                if (not isinstance(passes,list) or len(passes)!=2 or any(scan(p,begin,through) for p in passes)
-                        or money(snapshot.get('cash_balance_usdt'))!=cash[0]):
-                    raise ValueError('Idle cash/bill changes require reconciliation')
+                stage='idle_bills'
+                if not isinstance(passes,list) or len(passes)!=2 or any(scan(p,begin,through) for p in passes):
+                    raise ValueError('Idle bill changes require reconciliation')
+                stage='idle_cash'
+                if money(snapshot.get('cash_balance_usdt'))!=cash[0]:
+                    raise ValueError('Idle cash changes require reconciliation')
+                stage='idle_commit'
                 finished=self.authority._now(); self.authority._owner(finished); self._snapshot(snapshot,finished)
                 if gap:
                     resume_revision=self.db.execute('SELECT COALESCE(MAX(revision),0)+1 FROM demo_idle_resume').fetchone()[0]
@@ -205,5 +230,7 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
             except Exception:
                 self.db.execute('ROLLBACK'); raise
             return verified
-        except Exception:
-            raise DemoFillAuditError('Idle cycle audit incomplete; entry remains blocked') from None
+        except DemoIdleAuditError:
+            raise
+        except Exception as error:
+            raise DemoIdleAuditError(stage, failure_kind(error)) from None

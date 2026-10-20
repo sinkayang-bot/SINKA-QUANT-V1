@@ -9,7 +9,7 @@ import test_okx_demo_settlement as fixtures
 from test_okx_strategy_bridge import args,READY
 from test_okx_demo_executor import FakeExchange
 from okx_strategy_bridge import plan_strategy_signal
-from okx_demo_cycles import DemoCycleLifecycle
+from okx_demo_cycles import DemoCycleLifecycle, ARCHIVED_IDLE_RESUME_MS, DemoIdleAuditError
 from okx_demo_fill_audit import DemoFillAuditError,DemoFillAuditor
 from okx_demo_executor import DemoExecutor
 
@@ -201,7 +201,7 @@ class CycleTests(unittest.TestCase):
         for change in ('too_old','cash','fill','bill','archive','baseline','emergency','write_failure'):
             with self.subTest(change=change):
                 self.setUp(); self.roll(); db=self.t.journal.db
-                self.t.now+=43200001 if change=='too_old' else 7200000
+                self.t.now+=ARCHIVED_IDLE_RESUME_MS+1 if change=='too_old' else 7200000
                 self.t.authority.acquire(); raw,bills=self.idle()
                 if change=='cash': raw['cash_balance_usdt']='1'
                 if change=='fill': raw['recent_fills'].append(self.t.fill(billId='999',tradeId='999',ordId='999'))
@@ -219,6 +219,47 @@ class CycleTests(unittest.TestCase):
                 self.assertEqual(db.execute('SELECT baseline_at,last_checked,revision FROM demo_fill_audit_meta').fetchone(),before)
                 self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
                 self.assertIsNone(db.execute('SELECT 1 FROM demo_idle_resume').fetchone())
+
+    def test_archived_idle_next_day_resume_preserves_original_evidence(self):
+        for elapsed in (25*60*60*1000, ARCHIVED_IDLE_RESUME_MS):
+            with self.subTest(elapsed=elapsed):
+                self.setUp(); self.roll(); db=self.t.journal.db
+                tables=('demo_cycle_archive','demo_daily','demo_risk_entry','demo_risk_close',
+                    'demo_cash_baseline','demo_audit_fills')
+                before={t:db.execute('SELECT * FROM '+t).fetchall() for t in tables}
+                self.t.now+=elapsed; self.t.authority.acquire()
+                raw,bills=self.idle()
+                proof=self.cycles.audit_idle(raw,bills,resume_idle=True)
+                self.assertTrue(proof['fill_audit_ready'])
+                self.assertEqual(before,{t:db.execute('SELECT * FROM '+t).fetchall() for t in tables})
+                self.assertEqual(db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0],self.boundary)
+                self.assertEqual(db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+
+    def test_archived_idle_window_failure_has_safe_diagnostic(self):
+        self.roll(); self.t.now+=ARCHIVED_IDLE_RESUME_MS+1; self.t.authority.acquire()
+        raw,bills=self.idle()
+        with self.assertRaises(DemoIdleAuditError) as raised:
+            self.cycles.audit_idle(raw,bills,resume_idle=True)
+        self.assertEqual(raised.exception.audit_stage,'archived_idle_window')
+
+    def test_next_day_resume_still_rejects_activity_and_missing_anchor(self):
+        for change in ('cash','bill','fill','anchor','order','algo','position'):
+            with self.subTest(change=change):
+                self.setUp(); self.roll(); db=self.t.journal.db
+                self.t.now+=25*60*60*1000; self.t.authority.acquire()
+                raw,bills=self.idle()
+                if change=='cash': raw['cash_balance_usdt']='1'
+                if change=='bill':
+                    for pages in bills['passes']: pages[0]['data']=[{}]
+                if change=='fill': raw['recent_fills'].append(self.t.fill(billId='999',tradeId='999',ordId='999'))
+                if change=='anchor': raw['recent_fills']=[]
+                if change=='order': raw['pending_orders']=[{}]
+                if change=='algo': raw['pending_algos']=[{}]
+                if change=='position': raw['positions']=[{'pos':'1'}]
+                with self.assertRaises(DemoFillAuditError):
+                    self.cycles.audit_idle(raw,bills,resume_idle=True)
+                self.assertIsNone(db.execute('SELECT 1 FROM demo_idle_resume').fetchone())
+                self.assertEqual(db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0],self.boundary)
 
     def test_resume_receipt_identity_does_not_repeat_after_cycle_revision_reset(self):
         self.roll(); db=self.t.journal.db

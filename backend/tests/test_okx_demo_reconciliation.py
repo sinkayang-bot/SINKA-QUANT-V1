@@ -74,6 +74,21 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(all(r.method=='GET' for r in self.f.calls))
         self.assertNotIn('private',json.dumps(result)); self.assertNotIn('123456',json.dumps(result))
 
+    def test_archived_idle_next_day_get_only_resume_and_window_diagnostic(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        self.t.now+=25*60*60*1000; self.f.now=self.t.now
+        result=self.run_once(resume_idle=True)
+        self.assertEqual(result['phase'],'idle_verified')
+        self.assertEqual(result['sequence'],1)
+        self.assertEqual(result['orders_sent'],0)
+        self.t.now+=24*60*60*1000; self.f.now=self.t.now
+        result=self.run_once(resume_idle=True)
+        self.assertEqual(result['phase'],'blocked')
+        self.assertEqual(result['audit_stage'],'archived_idle_window')
+        self.assertEqual(result['failure_kind'],'validation_failed')
+        self.assertEqual(result['recovery_stage'],'idle_audit')
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
     def test_idle_transient_read_recovers_with_fresh_bundle(self):
         self.assertEqual(self.run_once()['phase'],'cycle_archived')
         original=self.runner.bill_reader.collect

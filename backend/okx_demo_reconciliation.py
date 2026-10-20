@@ -9,7 +9,7 @@ from copy import deepcopy
 import json
 from okx_demo_bill_reader import DemoBillReader, DemoBillReadError
 from okx_demo_close_reader import DemoCloseReader
-from okx_demo_cycles import DemoCycleLifecycle
+from okx_demo_cycles import DemoCycleLifecycle, DemoIdleAuditError
 from okx_demo_settlement import scan
 from okx_demo_snapshot import DemoSnapshotReader, DemoSnapshotError
 from okx_demo_read_errors import failure_kind
@@ -150,8 +150,13 @@ class DemoReconciliationRunner:
                     'bills_first_pass','bills_second_pass','bill_consistency'}
                 read_stage=getattr(error,'stage','unknown')
                 snapshot_stage=getattr(error,'snapshot_stage','unknown')
+                audit_stages={'idle_lease','idle_snapshot','idle_archive_chain','idle_baseline',
+                    'idle_resume','archived_idle_window','idle_inventory','idle_fills',
+                    'idle_bill_window','idle_bills','idle_cash','idle_commit'}
+                audit_stage=error.audit_stage if isinstance(error,DemoIdleAuditError) else 'unknown'
                 self.last_result=status('blocked',reason='reconciliation_unavailable',
                     recovery_stage=stage, failure_kind=failure_kind(error),
+                    audit_stage=audit_stage if audit_stage in audit_stages else 'unknown',
                     read_stage=read_stage if read_stage in allowed else 'unknown',
                     snapshot_stage=snapshot_stage if snapshot_stage in allowed else 'unknown',
                     read_attempts=self.read_attempts)

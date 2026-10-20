@@ -27,7 +27,10 @@ class IdleResumeTests(InitializationTests):
 
     def test_beyond_twelve_hours_never_refreshes_timestamp(self):
         self.bootstrap_gap(43200001)
-        self.assertEqual(self.run_resume()['phase'],'blocked')
+        result=self.run_resume()
+        self.assertEqual(result['phase'],'blocked')
+        self.assertEqual(result['audit_stage'],'idle_resume')
+        self.assertEqual(result['failure_kind'],'validation_failed')
         self.assertEqual(self.journal.db.execute('SELECT last_checked FROM demo_fill_audit_meta').fetchone()[0],self.baseline)
 
     def test_any_entry_reservation_blocks_even_with_empty_account(self):
@@ -56,13 +59,18 @@ class IdleResumeTests(InitializationTests):
         row=dict(billId='901',ts=str(self.f.now-1),type='8',subType='173',ordId='',tradeId='',
             instId='BTC-USDT-SWAP',instType='SWAP',ccy='USDT',pnl='-1',fee='0',balChg='-1',sz='1',px='100')
         self.f.bills=[row|dict(billId='902',balChg='1',pnl='1'),row]
-        self.assertEqual(self.run_resume()['phase'],'blocked')
+        result=self.run_resume()
+        self.assertEqual(result['phase'],'blocked')
+        self.assertEqual(result['audit_stage'],'idle_bills')
         self.assertEqual(self.journal.db.execute('SELECT COUNT(*) FROM demo_idle_resume').fetchone()[0],0)
 
     def test_record_write_failure_rolls_back_timestamp_and_receipt(self):
         self.bootstrap_gap()
         self.journal.db.execute("CREATE TRIGGER fail_resume BEFORE INSERT ON demo_idle_resume BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
-        self.assertEqual(self.run_resume()['phase'],'blocked')
+        result=self.run_resume()
+        self.assertEqual(result['phase'],'blocked')
+        self.assertEqual(result['audit_stage'],'idle_commit')
+        self.assertEqual(result['failure_kind'],'ledger_read_error')
         self.assertEqual(self.journal.db.execute('SELECT last_checked FROM demo_fill_audit_meta').fetchone()[0],self.baseline)
         self.assertEqual(self.journal.db.execute('SELECT valid FROM demo_audit_receipt').fetchone()[0],0)
 

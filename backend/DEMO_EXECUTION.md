@@ -775,3 +775,19 @@ entrypoint returned `phase=disabled`, zero orders and both entry/submission flag
 false. Image validation is performed by CI because local Docker is unavailable.
 All account requests in tests are intercepted; no actual OKX read, order/cancel,
 credential retrieval or cloud deployment was performed.
+
+### Archived idle restart window
+
+An explicitly requested `--resume-idle` can verify an archived flat cycle up to
+48 hours after its original archive boundary. The never-traded initial cycle
+retains its 12-hour limit. This is a bounded GET-only catch-up, not a new baseline:
+the archive chain, original fill anchor and immutable known fills, exact cash,
+flat inventory, no pending orders/algos, and two empty account-wide bill scans
+must all pass. No cash tolerance, ledger reset, or order retry is added. Missing
+historical evidence or an older baseline still blocks entry.
+
+Idle audit failures now expose a fixed `audit_stage` label through the control
+runner, including `archived_idle_window`, `idle_baseline`, `idle_bills`, or
+`idle_cash`. Raw exceptions, credentials, account identifiers and provider
+responses are never included. Source changes require a fresh Cloud Shell runner;
+an already-running clone does not update automatically.
