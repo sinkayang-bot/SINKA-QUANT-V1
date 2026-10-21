@@ -93,6 +93,18 @@ class CommandProcess:
             self.process.send_signal(signal.SIGINT);self.stop_sent=True
 
 
+class RunnerConnectionError(RuntimeError):
+    def __init__(self,stage,error):
+        from okx_demo_read_errors import failure_kind
+        self.stage=stage
+        self.kind=failure_kind(error)
+        # Fixed SDK exception names only; never exception text or response bodies.
+        name=type(error).__name__
+        self.reason=name if name in {'ServiceUnavailable','DeadlineExceeded','PermissionDenied',
+            'Unauthenticated','ResourceExhausted','RetryError','ControlBlocked'} else 'unavailable'
+        super().__init__('Runner connection ended')
+
+
 def run(store,*,seconds=3600):
     root=Path.home()/'sinka-demo-trial'
     # Existing pinned binding and ledger are mandatory; never bootstrap/reset.
@@ -101,23 +113,31 @@ def run(store,*,seconds=3600):
     lock=open(root/'control-runner.lock','a')
     os.chmod(root/'control-runner.lock',0o600)
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    runner=uuid.uuid4().hex;generation=store.acquire(runner)
+    runner=uuid.uuid4().hex
+    try:generation=store.acquire(runner)
+    except Exception as error:
+        lock.close()
+        raise RunnerConnectionError('connect',error) from None
     print(json.dumps({'phase':'runner_connected','live_trading_enabled':False,'trading_started':False}),flush=True)
     child=None;request_id=None;stopping=False;deadline=time.monotonic()+seconds
     def stop(*unused):
         nonlocal stopping
         stopping=True
     previous={signum:signal.signal(signum,stop) for signum in (signal.SIGINT,signal.SIGTERM)}
+    stage='poll'
     try:
         while time.monotonic()<deadline and not stopping:
+            stage='poll'
             command=store.poll(runner,generation)
             if command:
                 if command['action']=='stop':
                     if child and request_id==command['target']:child.stop()
                 else:
                     request_id=command['request_id']
+                    stage='launch_command'
                     child=CommandProcess(command['action'],lock.fileno())
             if child:
+                stage='read_child_result'
                 report=child.drain();finished=child.process.poll() is not None
                 if finished:
                     # Drain the pipe completely before publishing the final result.
@@ -126,9 +146,12 @@ def run(store,*,seconds=3600):
                     report=child.drain()
                     if report.get('phase') in {'starting','waiting_for_signal','native_protection_verified_monitor_required'}:
                         report=dict(report,phase='process_ended_check_required')
+                stage='publish_result'
                 store.publish(runner,generation,request_id,report,finished=finished)
                 if finished:child=None;request_id=None
             time.sleep(2)
+    except Exception as error:
+        raise RunnerConnectionError(stage,error) from None
     finally:
         if child:
             child.stop()
@@ -137,6 +160,8 @@ def run(store,*,seconds=3600):
             except subprocess.TimeoutExpired:pass
         for signum,handler in previous.items():signal.signal(signum,handler)
         lock.close()
+    print(json.dumps({'phase':'runner_disconnected','reason':'stop_requested' if stopping else 'runtime_limit',
+        'live_trading_enabled':False}),flush=True)
 
 
 def main():
@@ -148,6 +173,9 @@ def main():
         print(json.dumps({'phase':'disabled','live_trading_enabled':False}));return 0
     from google.cloud import firestore
     try:run(FirestoreControlStore(firestore.Client(project='sinka-quant',database='sinka-demo-control')),seconds=args.seconds)
+    except RunnerConnectionError as error:
+        print(json.dumps({'phase':'runner_stopped_check_required','read_stage':error.stage,
+            'failure_kind':error.kind,'reason':error.reason,'live_trading_enabled':False}));return 2
     except Exception:
         print(json.dumps({'phase':'runner_stopped_check_required','live_trading_enabled':False}));return 2
     return 0

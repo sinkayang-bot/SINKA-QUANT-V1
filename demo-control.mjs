@@ -50,6 +50,13 @@ export function createDemoControl({getUser,fetcher=fetch,onChange=()=>{}}) {
   };
 }
 
+export function runnerNotice(s) {
+  const valid=Number.isSafeInteger(s.heartbeat_at)&&s.heartbeat_at>0;
+  const heartbeat=valid?new Date(s.heartbeat_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}):'未提供';
+  if(!s.runner_online)return `執行器離線，目前無法執行指令；最後心跳：${heartbeat}（台灣時間）。下方為歷史紀錄，${s.phase} 不代表在線。`;
+  return '執行器已連線 · '+s.phase+(s.busy?' · 執行中':'')+(s.recovery_required?' · 需先恢復核對':'');
+}
+
 export function mountDemoControl({getUser}) {
   const host=document.getElementById('okx-demo-control');if(!host)return;
   const output=document.getElementById('demo-control-result'),notice=document.getElementById('demo-control-notice');
@@ -57,7 +64,7 @@ export function mountDemoControl({getUser}) {
   const control=createDemoControl({getUser,onChange:state=>{
     if(state.phase==='status'){
       const s=state.status;
-      notice.textContent=(s.runner_online?'執行器已連線':'執行器離線，畫面為歷史紀錄')+' · '+s.phase+(s.busy?' · 執行中':'');
+      notice.textContent=runnerNotice(s);
       output.textContent=JSON.stringify(s,null,2);
       host.querySelectorAll('[data-demo-action]').forEach(b=>b.disabled=!s.runner_online || s.command_pending || (s.busy && b.dataset.demoAction!=='stop'));
       host.querySelector('[data-demo-action="start"]').disabled=!s.runner_online || s.busy || s.command_pending || s.recovery_required;

@@ -152,3 +152,33 @@ class ControlTests(unittest.TestCase):
             self.assertIn('no-store',status.headers['Cache-Control'])
             self.assertEqual(client.post('/api/demo/commands',json={'action':'start','request_id':str(uuid.uuid4()),'api_key':'never-accepted'}).status_code,422)
             self.assertEqual(client.post('/api/demo/commands',json={'action':'live','request_id':str(uuid.uuid4())}).status_code,409)
+
+
+class RunnerDisconnectTests(unittest.TestCase):
+    def test_poll_failure_records_stage_without_replaying_commands(self):
+        import okx_demo_control_runner as runner
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'sinka-demo-trial';root.mkdir()
+            (root/'ledger.sqlite').touch();(root/'account.json').write_text('{}')
+            store=MagicMock();store.acquire.return_value=1
+            store.poll.side_effect=RuntimeError('private server data')
+            with patch.object(runner.Path,'home',return_value=Path(folder)):
+                with self.assertRaises(runner.RunnerConnectionError) as caught:
+                    runner.run(store,seconds=60)
+            self.assertEqual(caught.exception.stage,'poll')
+            self.assertNotIn('private',str(caught.exception))
+            self.assertEqual(store.poll.call_count,1)
+            store.publish.assert_not_called()
+
+    def test_idle_runtime_end_reports_normal_exit(self):
+        import okx_demo_control_runner as runner
+        import io
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'sinka-demo-trial';root.mkdir()
+            (root/'ledger.sqlite').touch();(root/'account.json').write_text('{}')
+            store=MagicMock();store.acquire.return_value=1
+            output=io.StringIO()
+            with patch.object(runner.Path,'home',return_value=Path(folder)),patch('sys.stdout',output):
+                runner.run(store,seconds=0)
+            self.assertIn('runtime_limit',output.getvalue())
+            store.poll.assert_not_called()
