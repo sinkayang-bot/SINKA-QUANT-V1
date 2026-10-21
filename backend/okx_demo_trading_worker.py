@@ -7,6 +7,7 @@ No unattended deployment/scheduler is provided by this entry point.
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import time
@@ -56,6 +57,16 @@ class DemoProgress:
             reason=result.get('gate_reason')
             if not isinstance(reason,str) or reason not in self.GATE_REASONS: reason='unspecified'
             gate['gate_reason']=reason
+            diagnostics=result.get('entry_diagnostics')
+            if reason=='signal_stop_distance' and isinstance(diagnostics,dict):
+                safe={}
+                if diagnostics.get('stop_rejection') in {'below_minimum','above_maximum','invalid_rounded_price'}:
+                    safe['stop_rejection']=diagnostics['stop_rejection']
+                for key in ('stop_distance_pct','min_stop_pct','max_stop_pct'):
+                    value=diagnostics.get(key)
+                    if isinstance(value,str) and re.fullmatch(r'-?[0-9]{1,12}(\.[0-9]{1,12})?',value):
+                        safe[key]=value
+                if safe:gate['entry_diagnostics']=safe
             retry=result.get('retry_after_seconds')
             if type(retry) is int and 0<=retry<=86400: gate['retry_after_seconds']=retry
             self.gate_counts[reason]=self.gate_counts.get(reason,0)+1

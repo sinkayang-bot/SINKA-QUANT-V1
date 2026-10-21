@@ -24,7 +24,7 @@ from okx_demo_transport import DEMO_HEADERS
 from okx_demo_authority import day_key
 from okx_orders import ACTIVE, parse_order
 from okx_reconcile import number
-from okx_strategy_bridge import plan_strategy_signal,plan_execution_test
+from okx_strategy_bridge import plan_strategy_signal,plan_execution_test,StrategyStopDistanceError
 
 
 def outcome(phase):
@@ -125,7 +125,8 @@ class DemoTradingSession:
                         'Risk budget cannot fund the minimum contract size':'minimum_size_not_funded'}
                     reason=reasons.get(str(error))
                     if execution_test or reason is None: raise
-                    return outcome('entry_gate_blocked')|{'gate_reason':reason,'retry_after_seconds':0}
+                    details={'entry_diagnostics':error.diagnostics} if isinstance(error,StrategyStopDistanceError) else {}
+                    return outcome('entry_gate_blocked')|{'gate_reason':reason,'retry_after_seconds':0}|details
                 if not self.authority.allows(candidate):
                     now=self._owner()
                     daily=self.db.execute('SELECT entries,loss_streak,halt,cooldown FROM demo_daily WHERE day=?',(day_key(now),)).fetchone()

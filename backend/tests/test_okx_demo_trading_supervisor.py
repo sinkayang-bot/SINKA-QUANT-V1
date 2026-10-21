@@ -173,6 +173,25 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_stop_distance_details_survive_waiting_and_filter_private_fields(self):
+        import io
+        from contextlib import redirect_stdout
+        stream=io.StringIO(); reporter=DemoProgress(True)
+        with redirect_stdout(stream):
+            reporter(dict(phase='entry_gate_blocked',gate_reason='signal_stop_distance',
+                selected_symbol='LTC-USDT-SWAP',selected_strategy='SNR-5M-FAST-1',
+                entry_diagnostics={'stop_rejection':'below_minimum','stop_distance_pct':'0.12000000',
+                    'min_stop_pct':'0.2','max_stop_pct':'3','api_key':'private', 'uid':'private'}))
+            reporter({'phase':'waiting_for_signal'})
+        rows=[json.loads(line) for line in stream.getvalue().splitlines()]
+        details=rows[0]['entry_diagnostics']
+        self.assertEqual(details['stop_rejection'],'below_minimum')
+        self.assertEqual(details['stop_distance_pct'],'0.12000000')
+        self.assertEqual(reporter.last_entry_block['entry_diagnostics'],details)
+        self.assertEqual(reporter.last_entry_block['selected_symbol'],'LTC-USDT-SWAP')
+        self.assertNotIn('private',stream.getvalue())
+        self.assertNotIn('entry_diagnostics',rows[-1])
+
     def test_block_reason_and_symbol_changes_print_and_survive_later_waiting(self):
         import io
         from contextlib import redirect_stdout

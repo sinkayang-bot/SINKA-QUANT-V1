@@ -1,6 +1,7 @@
 """All GET/POST traffic is intercepted; synthetic credentials only."""
 import asyncio
 from copy import deepcopy
+from decimal import Decimal
 import json
 from pathlib import Path
 import tempfile
@@ -211,10 +212,23 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         source['signal']['stop']='100.99'
         result=await self.session.enter(source)
         self.assertEqual(result['gate_reason'],'signal_stop_distance')
+        self.assertEqual(result['entry_diagnostics']['stop_rejection'],'below_minimum')
+        self.assertLess(Decimal(result['entry_diagnostics']['stop_distance_pct']),Decimal('0.2'))
+        self.assertEqual(result['entry_diagnostics']['min_stop_pct'],'0.2')
+        self.assertEqual(result['entry_diagnostics']['max_stop_pct'],'3')
         self.assertEqual(self.f.posts,[])
         self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
         self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],0)
         self.assertEqual((await self.session.enter(args()))['phase'],'native_protection_verified_monitor_required')
+
+    async def test_wide_stop_diagnostic_does_not_submit_or_reserve(self):
+        source=args(); source['signal']['stop']='90'
+        result=await self.session.enter(source)
+        self.assertEqual(result['gate_reason'],'signal_stop_distance')
+        self.assertEqual(result['entry_diagnostics']['stop_rejection'],'above_maximum')
+        self.assertGreater(Decimal(result['entry_diagnostics']['stop_distance_pct']),Decimal('3'))
+        self.assertEqual(self.f.posts,[])
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
 
     async def test_demo_without_daily_limits_enters_with_existing_halt_and_still_prevents_duplicate(self):
         self.owner.daily_limits_enabled=False

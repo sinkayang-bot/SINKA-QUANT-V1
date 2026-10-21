@@ -107,6 +107,17 @@ class ControlTests(unittest.TestCase):
             'failure_kind':'validation_failed','raw_error':'secret account details'}})
         self.assertEqual(value['worker']['audit_stage'],'archived_idle_window')
         self.assertNotIn('secret',str(value))
+
+    def test_last_entry_block_keeps_stop_diagnostics_in_final_control_report(self):
+        value=safe_report({'worker':{'phase':'stopped_no_active_intent','last_entry_block':{
+            'gate_reason':'signal_stop_distance','ticks':10,'selected_symbol':'LTC-USDT-SWAP',
+            'selected_strategy':'SNR-5M-FAST-1','entry_diagnostics':{
+                'stop_rejection':'below_minimum','stop_distance_pct':'0.12000000',
+                'min_stop_pct':'0.2','max_stop_pct':'3','api_key':'private'}}}})
+        block=value['worker']['last_entry_block']
+        self.assertEqual(block['selected_symbol'],'LTC-USDT-SWAP')
+        self.assertEqual(block['entry_diagnostics']['stop_distance_pct'],'0.12000000')
+        self.assertNotIn('private',str(value))
     def test_api_denies_missing_auth_and_wrong_owner_and_disabled(self):
         app=create_app(self.store);client=TestClient(app)
         with patch.dict(os.environ,{'SINKA_OWNER_UID':'synthetic-owner','SINKA_DEMO_CONTROL':'true'}):

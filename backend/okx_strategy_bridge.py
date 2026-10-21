@@ -15,6 +15,16 @@ STRATEGY_PREFIXES={VERSION:'SNR5M1', 'SNR-5M-FAST-1':'SNR5MFAST1','SNR-5M-RETEST
 BAR_MS = 300000
 
 
+class StrategyStopDistanceError(ValueError):
+    def __init__(self, entry, stop, distance):
+        super().__init__('Rounded stop distance outside strategy limits')
+        reason='invalid_rounded_price' if entry<=0 or stop<=0 else (
+            'below_minimum' if distance/entry<Decimal('0.002') else 'above_maximum')
+        self.diagnostics={'stop_rejection':reason,'min_stop_pct':'0.2','max_stop_pct':'3'}
+        if entry>0:
+            self.diagnostics['stop_distance_pct']=format(distance/entry*100,'.8f')
+
+
 def timestamp(value):
     if type(value) is not int or not 0 <= value <= 9007199254740991:
         raise ValueError("Invalid timestamp")
@@ -85,7 +95,7 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
         entry = anchor * (1 + side * Decimal("0.0002"))
         distance = side * (entry - stop)
         if anchor <= 0 or stop <= 0 or not Decimal("0.002") <= distance / entry <= Decimal("0.03"):
-            raise ValueError("Rounded stop distance outside strategy limits")
+            raise StrategyStopDistanceError(entry,stop,distance)
         target = anchor + side * 2 * abs(anchor - stop)
         if target <= 0:
             raise ValueError("Invalid target")

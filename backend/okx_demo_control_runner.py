@@ -19,7 +19,7 @@ import uuid
 from okx_demo_control_store import FirestoreControlStore
 
 SCALARS=frozenset({'phase','stop_reason','recovery_stage','audit_stage','failure_kind','read_stage','snapshot_stage','selected_symbol',
-    'selected_strategy','strategy_profile','reason','gate_reason','mode','instrument_context_source'})
+    'selected_strategy','strategy_profile','reason','gate_reason','stop_rejection','mode','instrument_context_source'})
 NUMBERS=frozenset({'ticks','ticks_observed','sequence','read_attempts','pending_algo_count','heartbeat_at',
     'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals','excluded',
     'breakout_not_met','trend_not_met','warmup','invalid_stop','cooldown_remaining_seconds'})
@@ -28,8 +28,8 @@ BOOLS=frozenset({'flat_verified','protection_verified','ledger_archived','automa
     'daily_limits_enabled','new_entry_allowed','within_deadline','snapshot_stable','order_lookup_stable',
     'order_lookup_valid','permission_verified'})
 GROUPS=frozenset({'worker','closure','stop_diagnostics','scan','tick_counts','entry_gate_counts',
-    'protection_diagnostics','consistency_checks'})
-AMOUNTS=frozenset({'net_usdt','fees_usdt','realized_pnl_usdt'})
+    'protection_diagnostics','consistency_checks','last_entry_block','entry_diagnostics'})
+AMOUNTS=frozenset({'net_usdt','fees_usdt','realized_pnl_usdt','stop_distance_pct','min_stop_pct','max_stop_pct'})
 LABEL=re.compile(r'[A-Za-z0-9_-]{1,100}\Z')
 
 

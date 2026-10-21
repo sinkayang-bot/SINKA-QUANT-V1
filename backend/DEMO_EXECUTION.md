@@ -791,3 +791,15 @@ runner, including `archived_idle_window`, `idle_baseline`, `idle_bills`, or
 `idle_cash`. Raw exceptions, credentials, account identifiers and provider
 responses are never included. Source changes require a fresh Cloud Shell runner;
 an already-running clone does not update automatically.
+
+### Stop-distance gate diagnostics
+
+Rejected strategy stops retain the existing 0.2% to 3% bounds after tick
+rounding and adverse entry slippage. Both live progress and the final retained
+`last_entry_block` report include `entry_diagnostics`: fixed `stop_rejection`
+labels (`below_minimum`, `above_maximum`, `invalid_rounded_price`),
+`stop_distance_pct`, `min_stop_pct`, and `max_stop_pct`. The final block also
+retains the selected instrument, strategy and scan tick. No account amounts,
+raw exception messages or credentials are added. Rejected candidates create
+no intent or order. Earlier runs did not retain these measurements and cannot
+be diagnosed retrospectively from the aggregate counter alone.
