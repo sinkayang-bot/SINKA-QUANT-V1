@@ -32,7 +32,7 @@ REQUIRED=('OKX_API_KEY','OKX_API_SECRET','OKX_API_PASSPHRASE','OKX_EXPECTED_UID'
 class DemoProgress:
     """Report fixed labels only; never serialize account or upstream data."""
     GATE_REASONS=frozenset({'daily_risk_halt','daily_entry_limit','risk_cooldown',
-        'account_or_plan_verification','signal_price_drift','signal_stop_distance','minimum_size_not_funded'})
+        'account_or_plan_verification','signal_expired','signal_price_drift','signal_stop_distance','minimum_size_not_funded'})
     PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
         'blocked_reconciliation_required',
         'native_protection_verified_monitor_required','kill_switch_active',
@@ -85,7 +85,7 @@ class DemoProgress:
                     payload['scan']={k:v for k,v in scan.items() if k in {
                         'universe','eligible','checked','no_signal','expired','prestart',
                         'fetch_failed','signals','excluded','breakout_not_met','trend_not_met',
-                        'warmup','invalid_stop'} and type(v) is int and 0<=v<=20}
+                        'warmup','invalid_stop','deferred_candidates'} and type(v) is int and 0<=v<=20}
                 if result.get('selected_symbol') in SYMBOLS:
                     payload['selected_symbol']=result['selected_symbol']
                 if result.get('selected_strategy') in STRATEGY_PREFIXES:

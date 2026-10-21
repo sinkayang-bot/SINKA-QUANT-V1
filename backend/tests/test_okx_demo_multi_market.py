@@ -51,6 +51,30 @@ class MultiMarketTests(SupervisorTests):
         self.assertIs(self.f.posts[1][1]['reduceOnly'],True)
         self.assertEqual(self.f.positions,[])
 
+    async def test_rejected_first_market_does_not_starve_next_market(self):
+        self.enable_eth()
+        btc=args();btc['signal']['stop']='100.9'
+        eth=args();eth['quote']['symbol']='ETH-USDT-SWAP'
+        sources=[{k:a[k] for k in ('strategy_version','signal','quote')} for a in (btc,eth)]
+        payload={'sources':sources,'scan':dict(universe=20,eligible=20,checked=20,
+            no_signal=18,expired=0,prestart=0,fetch_failed=0,signals=2)}
+        class Process:
+            returncode=0
+            async def communicate(self):return json.dumps(payload).encode(),None
+        scanner=DemoMarketScanner()
+        self.supervisor=DemoTradingSupervisor(self.session,self.runner,scanner,enabled=True,scan_markets=True)
+        self.supervisor.started_at=self.f.now-2000
+        with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',return_value=Process()):
+            first=await self.supervisor.tick()
+            self.assertEqual(first['gate_reason'],'signal_stop_distance')
+            self.assertEqual(self.f.posts,[])
+            second=await self.supervisor.tick()
+        self.assertEqual(second['selected_symbol'],'ETH-USDT-SWAP')
+        self.assertEqual(second['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(len(self.f.posts),1)
+        self.assertEqual(self.f.posts[0][1]['instId'],'ETH-USDT-SWAP')
+        self.assertEqual(scanner.last_scan['deferred_candidates'],1)
+
     async def test_unsupported_altcoin_configuration_skips_without_reservation(self):
         async def scan(*a):
             result=args();result['quote']['symbol']='ETH-USDT-SWAP';return result
@@ -99,6 +123,24 @@ class ScannerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(scanner.last_scan['breakout_not_met'],18)
             payload['scan']['breakout_not_met']=17
             with self.assertRaises(ValueError): await scanner('BTC-USDT-SWAP',1)
+
+    async def test_deferred_candidate_returns_on_new_candle_and_cache_is_bounded(self):
+        source={'strategy_version':'SNR-5M-1','signal':{'id':'24000000'},'quote':{'symbol':'BTC-USDT-SWAP'}}
+        payload={'sources':[source],'scan':dict(universe=20,eligible=20,checked=20,
+            no_signal=19,expired=0,prestart=0,fetch_failed=0,signals=1)}
+        class Process:
+            returncode=0
+            async def communicate(self):return json.dumps(payload).encode(),None
+        scanner=DemoMarketScanner()
+        with patch('okx_demo_market_scanner.asyncio.create_subprocess_exec',return_value=Process()):
+            first=await scanner('BTC-USDT-SWAP',1);scanner.defer(first)
+            self.assertIsNone(await scanner('BTC-USDT-SWAP',1))
+            source['signal']['id']='24300000'
+            self.assertIsNotNone(await scanner('BTC-USDT-SWAP',1))
+            self.assertEqual(scanner.deferred,set())
+        for n in range(100):
+            scanner.defer(dict(source,signal={'id':str(n)}))
+        self.assertLessEqual(len(scanner.deferred),60)
 
     async def test_cancelled_scanner_kills_and_reaps_child(self):
         started=asyncio.Event();calls=[]

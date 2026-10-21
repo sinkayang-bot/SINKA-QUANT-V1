@@ -136,6 +136,43 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('private-server-value',json.dumps(result))
         self.assertEqual(self.f.posts,[])
 
+    async def test_expired_market_signal_skips_without_halt_and_next_fresh_signal_can_enter(self):
+        from test_okx_strategy_bridge import READY
+        self.f.now=READY+20001
+        result=await self.session.enter(args())
+        self.assertEqual((result['phase'],result['gate_reason']),('entry_gate_blocked','signal_expired'))
+        self.assertEqual(self.f.posts,[])
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],0)
+        while self.f.now+20000<READY+301000:
+            self.f.now+=20000
+            idle=await self.session.enter(args())
+            self.assertEqual(idle['gate_reason'],'signal_expired')
+        self.f.now=READY+301000
+        source=args();source['signal'].update(ts=24300000,id='24300000',readyAt=READY+300000)
+        source['quote']['ts']=READY+300100
+        result=await self.session.enter(source)
+        self.assertEqual(result['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(len(self.f.posts),1)
+
+    async def test_future_market_timestamp_still_halts_without_order(self):
+        source=args();source['quote']['ts']=self.f.now+1
+        result=await self.session.enter(source)
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(self.f.posts,[])
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+
+    async def test_expiry_after_reservation_still_preserves_intent_and_halts(self):
+        reserve=self.journal.reserve_entry
+        def delayed(client_id):
+            reserve(client_id);self.f.now+=20001
+        with patch.object(self.journal,'reserve_entry',side_effect=delayed):
+            result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertIsNotNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+        self.assertEqual(self.f.posts,[])
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+
     async def test_full_entry_checks_native_protection_and_cannot_duplicate(self):
         result=await self.session.enter(args())
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')

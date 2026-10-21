@@ -4,6 +4,7 @@ A trusted runtime supplies a public strategy source, explicit arming intent,
 and two account readers bound to the same configured demo credentials/UID.
 No scheduler or deployment is created. Emergency paths stop for separate review.
 """
+from okx_demo_market_scanner import DemoMarketScanner
 import asyncio
 import json
 from copy import deepcopy
@@ -129,6 +130,10 @@ class DemoTradingSupervisor:
         source=deepcopy(source)
         source['started_at_ms']=self.started_at
         result=self._scan_status(await self.session.enter(source,execution_test=True) if self.execution_test else await self.session.enter(source),selected)
+        if (self.scan_markets and isinstance(self.source,DemoMarketScanner)
+                and result.get('phase')=='entry_gate_blocked'
+                and result.get('gate_reason') in {'signal_stop_distance','minimum_size_not_funded','signal_expired'}):
+            self.source.defer(source)
         if source.get('strategy_version') in STRATEGY_PREFIXES:
             result['selected_strategy']=source['strategy_version']
         return result

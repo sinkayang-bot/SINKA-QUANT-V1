@@ -15,6 +15,20 @@ STRATEGY_PREFIXES={VERSION:'SNR5M1', 'SNR-5M-FAST-1':'SNR5MFAST1','SNR-5M-RETEST
 BAR_MS = 300000
 
 
+class StrategySourceExpiredError(ValueError):
+    """Past market evidence expired before reservation; account evidence is separate."""
+    def __init__(self):
+        super().__init__('Strategy market source expired')
+
+
+def fresh_market(stamp,now,maximum):
+    stamp=timestamp(stamp)
+    if stamp>now:
+        raise ValueError('Stale or future source')
+    if now-stamp>maximum:
+        raise StrategySourceExpiredError()
+
+
 class StrategyStopDistanceError(ValueError):
     def __init__(self, entry, stop, distance):
         super().__init__('Rounded stop distance outside strategy limits')
@@ -70,11 +84,11 @@ def plan_strategy_signal(*, account_scope, strategy_version, symbol, signal,
     ready = timestamp(signal.get("readyAt"))
     if opened % BAR_MS or ready != opened + BAR_MS or signal.get("id") != str(opened):
         raise ValueError("Signal candle identity mismatch")
-    fresh(ready, now, 20000)
+    fresh_market(ready, now, 20000)
     if ready <= started:
         raise ValueError("Signal predates worker start")
     quote_time = timestamp(quote.get("ts"))
-    fresh(quote_time, now, 15000)
+    fresh_market(quote_time, now, 15000)
     if quote_time < ready:
         raise ValueError("Quote predates confirmed signal")
     with localcontext() as context:

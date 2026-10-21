@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from okx_risk import SYMBOLS
-from okx_strategy_bridge import timestamp
+from okx_strategy_bridge import timestamp,STRATEGY_PREFIXES
 
 SCAN_FIELDS=frozenset({'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals'})
 REASON_FIELDS=frozenset({'breakout_not_met','trend_not_met','warmup','invalid_stop'})
@@ -16,6 +16,20 @@ class DemoMarketScanner:
         self.script=Path(__file__).resolve().parents[1]/'strategy'/'demo-market-scan.mjs'
         self.last_scan={}
         self.excluded=set()
+        self.deferred=set()
+
+    @staticmethod
+    def candidate_key(source):
+        signal=source.get('signal',{});quote=source.get('quote',{})
+        if not isinstance(signal,dict) or not isinstance(quote,dict):return None
+        market=quote.get('symbol');version=source.get('strategy_version');bar=signal.get('id')
+        if market not in SYMBOLS or version not in STRATEGY_PREFIXES or not isinstance(bar,str) or not bar.isdigit():return None
+        return market,version,bar
+
+    def defer(self,source):
+        key=self.candidate_key(source)
+        if key is not None and len(self.deferred)<60:self.deferred.add(key)
+
 
     async def __call__(self,symbol,started_at):
         if symbol not in SYMBOLS: raise ValueError('Unknown market')
@@ -47,8 +61,11 @@ class DemoMarketScanner:
                 market=quote['symbol']
                 if market in seen: raise ValueError()
                 seen.add(market)
-            self.last_scan=dict(scan,excluded=len(self.excluded))
-            return next((source for source in sources if source['quote']['symbol'] not in self.excluded),None)
+            current={key for source in sources if (key:=self.candidate_key(source)) is not None}
+            self.deferred.intersection_update(current)
+            self.last_scan=dict(scan,excluded=len(self.excluded),deferred_candidates=len(self.deferred))
+            return next((source for source in sources if source['quote']['symbol'] not in self.excluded
+                and self.candidate_key(source) not in self.deferred),None)
         except asyncio.CancelledError: raise
         except Exception: raise ValueError('Public market scanner unavailable') from None
         finally:
