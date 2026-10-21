@@ -1,4 +1,5 @@
 // Real OKX demo control is isolated from the browser paper simulator.
+import {phaseChinese,controlSummary,controlErrorChinese} from './demo-control-zh.mjs?v=zh-1';
 export function controlBase(value) {
   const url=new URL(value);
   if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash ||
@@ -53,25 +54,30 @@ export function createDemoControl({getUser,fetcher=fetch,onChange=()=>{}}) {
 export function runnerNotice(s) {
   const valid=Number.isSafeInteger(s.heartbeat_at)&&s.heartbeat_at>0;
   const heartbeat=valid?new Date(s.heartbeat_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}):'未提供';
-  if(!s.runner_online)return `執行器離線，目前無法執行指令；最後心跳：${heartbeat}（台灣時間）。下方為歷史紀錄，${s.phase} 不代表在線。`;
-  return '執行器已連線 · '+s.phase+(s.busy?' · 執行中':'')+(s.recovery_required?' · 需先恢復核對':'');
+  if(!s.runner_online)return `執行器離線，目前無法執行指令；最後心跳：${heartbeat}（台灣時間）。下方為歷史紀錄，不代表仍在運作。`;
+  return '執行器已連線 · '+phaseChinese(s.phase)+(s.busy?' · 執行中':'')+(s.recovery_required?' · 需先恢復核對':'');
 }
 
 export function mountDemoControl({getUser}) {
   const host=document.getElementById('okx-demo-control');if(!host)return;
   const output=document.getElementById('demo-control-result'),notice=document.getElementById('demo-control-notice');
+  const summary=document.getElementById('demo-control-summary');
   let timer=null;
   const control=createDemoControl({getUser,onChange:state=>{
     if(state.phase==='status'){
       const s=state.status;
       notice.textContent=runnerNotice(s);
       output.textContent=JSON.stringify(s,null,2);
+      if(summary)summary.textContent=controlSummary(s);
       host.querySelectorAll('[data-demo-action]').forEach(b=>b.disabled=!s.runner_online || s.command_pending || (s.busy && b.dataset.demoAction!=='stop'));
       host.querySelector('[data-demo-action="start"]').disabled=!s.runner_online || s.busy || s.command_pending || s.recovery_required;
       host.querySelector('[data-demo-action="stop"]').disabled=!s.runner_online || !s.busy || s.command_pending;
-    } else notice.textContent=state.phase==='command_accepted'?'指令已送出，等待執行器回覆。':state.phase==='signed_out'?'尚未連線，請先登入。':'服務已設定，請更新狀態。';
+    } else {
+      notice.textContent=state.phase==='command_accepted'?'指令已送出，等待執行器回覆。':state.phase==='signed_out'?'尚未連線，請先登入。':'服務已設定，請更新狀態。';
+      if(summary&&state.phase==='signed_out')summary.textContent='登入並連線後顯示目前進度。';
+    }
   }});
-  function failure(error){notice.textContent='操作未完成：'+error.message;}
+  function failure(error){notice.textContent='操作未完成：'+controlErrorChinese(error?.message);}
   document.getElementById('demo-control-connect').addEventListener('click',async()=>{
     try{
       control.configure(document.getElementById('demo-control-url').value.trim());

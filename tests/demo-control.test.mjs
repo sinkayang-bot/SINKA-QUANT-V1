@@ -70,6 +70,6 @@ test('an in-flight command is neither duplicated nor replayed by polling',async(
 test('offline ready does not imply online and includes last heartbeat',async()=>{
   const {runnerNotice}=await import('../demo-control.mjs');
   const text=runnerNotice({runner_online:false,phase:'ready',heartbeat_at:1792594233340});
-  assert.match(text,/執行器離線/);assert.match(text,/22:50:33/);assert.match(text,/ready 不代表在線/);
+  assert.match(text,/執行器離線/);assert.match(text,/22:50:33/);assert.match(text,/不代表仍在運作/);
   assert.match(runnerNotice({runner_online:true,phase:'ready',recovery_required:true}),/需先恢復核對/);
 });

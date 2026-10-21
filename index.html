@@ -16,7 +16,7 @@
 <button type="button" data-demo-action="audit">核對成交帳單</button>
 <button type="button" data-demo-action="settle">驗證並結算歸檔</button></p>
 <p id="demo-control-notice" class="note" role="status">尚未連線；未啟動 OKX 模擬交易。停止指令可能執行模擬減倉，仍須確認回報結果。</p>
-<pre id="demo-control-result" style="max-height:420px;overflow:auto;white-space:pre-wrap"></pre></div>
+<div id="demo-control-summary" class="note" role="status" style="white-space:pre-line;font-size:16px;line-height:1.9">登入並連線後顯示目前進度。</div><details style="margin-top:16px"><summary>查看原始診斷紀錄（排查問題用）</summary><pre id="demo-control-result" style="max-height:420px;overflow:auto;white-space:pre-wrap"></pre></details></div>
 
 <h2 class="section">SNR 自動策略測試 <small>SNR-5M-1 · 獨立紙上帳戶</small></h2>
 <div class="card"><p class="note">從策略訊號到進場、停損、停利及紀錄的完整紙上測試。使用 OKX 公開行情，資金為獨立的 10,000 USDT；不會送單至 OKX 模擬或真實帳戶。</p>
@@ -63,4 +63,4 @@ setInterval(()=>{if(socket?.readyState===1){try{socket.send('ping');}catch(_){}}
  window.addEventListener('hashchange',()=>show(location.hash.slice(1)));
  show(location.hash.slice(1));
 })();
-</script><script type="module" src="./auth-web.mjs?v=remember-1"></script><script type="module" src="./strategy/strategy-ui.mjs?v=strategy-1"></script></body></html>
+</script><script type="module" src="./auth-web.mjs?v=remember-zh-1"></script><script type="module" src="./strategy/strategy-ui.mjs?v=strategy-1"></script></body></html>
