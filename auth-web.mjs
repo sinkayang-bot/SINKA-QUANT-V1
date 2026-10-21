@@ -4,10 +4,16 @@ import {createStatusSession} from './readonly-session.mjs?v=clear-1';
 import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=clear-1';
 import {createAssetsSession} from './readonly-assets.mjs?v=clear-1';
 import {renderAssets} from './assets-view.mjs?v=clear-1';
+import {rememberLogin, loginPersistence, changeLoginPersistence} from './auth-persistence.mjs?v=remember-1';
 
 const $ = id => document.getElementById(id);
 const login = $('owner-login'), logout = $('owner-logout'), refresh = $('owner-refresh');
 const account = $('owner-account'), status = $('owner-status'), time = $('owner-checked');
+const remember = $('owner-remember');
+let preferenceStorage;
+try { preferenceStorage = window.localStorage; } catch {}
+let rememberChoice = rememberLogin(preferenceStorage);
+if (remember) remember.checked = rememberChoice;
 const checkRows = ['account-config', 'balances', 'positions', 'instruments', 'pending-orders']
   .map(name => $('owner-check-' + name));
 const messages = {
@@ -100,6 +106,22 @@ logout.addEventListener('click', async () => {
   catch { status.textContent = '登出未完成，已清除查詢結果，請再次按登出。'; }
   finally { authBusy = false; logout.disabled = false; }
 });
+remember?.addEventListener('change', async () => {
+  if (!auth || authBusy) {remember.checked = rememberChoice; return;}
+  authBusy = true; remember.disabled = true; login.disabled = true;
+  syncRefreshButtons();
+  try {
+    await changeLoginPersistence({sdk, auth, remember: remember.checked, storage: preferenceStorage});
+    rememberChoice = remember.checked;
+    status.textContent = rememberChoice ? '已設定記住此裝置的登入；登出可清除。' : '已改為只保留本頁登入；重新整理或關閉後需再次登入。';
+  } catch {
+    remember.checked = rememberChoice;
+    status.textContent = '瀏覽器無法變更登入保存設定；原設定保留。';
+  } finally {
+    authBusy = false; remember.disabled = false; login.disabled = false;
+    syncRefreshButtons();
+  }
+});
 refresh.addEventListener('click', () => {if(assetsSession.getState().phase!=='checking')session.refresh();});
 $('asset-refresh')?.addEventListener('click',()=>{if(session.getState().phase!=='checking')assetsSession.refresh();});
 $('owner-clear-results')?.addEventListener('click',()=>{
@@ -144,11 +166,12 @@ try {
     import('https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js'),
   ]);
   sdk = authSdk;
-  // Initialize with memory-only persistence from the outset, not localStorage.
+  // Restore the same named Firebase app's saved session before enabling login.
+  // Restricted browsers may fall back to this-page-only persistence.
   auth = sdk.initializeAuth(appSdk.initializeApp(FIREBASE_CONFIG, 'sinka-owner-login'), {
-    persistence: sdk.inMemoryPersistence, popupRedirectResolver: sdk.browserPopupRedirectResolver,
+    persistence: loginPersistence(sdk, rememberChoice), popupRedirectResolver: sdk.browserPopupRedirectResolver,
   });
-  sdk.onAuthStateChanged(auth, user => {renderUser(user); login.disabled = false;}, () => {
+  sdk.onAuthStateChanged(auth, user => {renderUser(user); login.disabled = false; if(remember)remember.disabled=false;}, () => {
     session.setUser(null); assetsSession.setUser(null); status.textContent = '登入狀態無法確認，請重新整理後再試。';
   });
 } catch {
