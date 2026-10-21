@@ -225,7 +225,8 @@ class SnapshotTests(unittest.IsolatedAsyncioTestCase):
         def mutate(f,path,count):
             if path.endswith("/config") and count==2: f.now=NOW+5001
         f.mutate=mutate
-        with self.assertRaises(DemoSnapshotError): await f.reader().collect()
+        with self.assertRaises(DemoSnapshotError) as caught: await f.reader().collect()
+        self.assertEqual(caught.exception.issue,'snapshot_expired')
         f=Fixture(); f.mutate=lambda f,p,c:setattr(f,"now",NOW-1) if p.endswith("/config") and c==2 else None
         with self.assertRaises(DemoSnapshotError): await f.reader().collect()
 

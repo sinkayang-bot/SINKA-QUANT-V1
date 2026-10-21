@@ -345,3 +345,50 @@ def test_recover_only_uses_existing_worker_without_entry_or_baseline_optin(monke
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
     assert prepare_args['recovery_only'] is True
     assert 'synthetic' not in capsys.readouterr().out
+
+
+def test_startup_snapshot_retries_only_complete_get_reads():
+    from unittest.mock import AsyncMock
+    from okx_demo_snapshot import DemoSnapshotError
+    reader=SimpleNamespace(collect=AsyncMock(side_effect=[
+        DemoSnapshotError('private',stage='snapshot_consistency',kind='validation_failed',issue='snapshot_changed'),
+        DemoSnapshotError('private',stage='inventory_second_pass',kind='timeout'),{'complete':True}]))
+    assert asyncio.run(setup.startup_snapshot(reader))=={'complete':True}
+    assert reader.collect.await_count==3
+
+
+def test_startup_snapshot_exhaustion_reports_safe_diagnostics():
+    from unittest.mock import AsyncMock
+    from okx_demo_snapshot import DemoSnapshotError
+    reader=SimpleNamespace(collect=AsyncMock(side_effect=DemoSnapshotError(
+        'private account',stage='snapshot_consistency',kind='validation_failed',issue='snapshot_expired')))
+    with pytest.raises(setup.SetupBlocked) as caught:
+        asyncio.run(setup.startup_snapshot(reader))
+    assert reader.collect.await_count==3
+    assert caught.value.diagnostics==dict(snapshot_stage='snapshot_consistency',
+        failure_kind='validation_failed',snapshot_issue='snapshot_expired',read_attempts=3)
+    assert 'private' not in str(caught.value.diagnostics)
+
+
+def test_startup_snapshot_identity_validation_is_never_retried():
+    from unittest.mock import AsyncMock
+    from okx_demo_snapshot import DemoSnapshotError
+    reader=SimpleNamespace(collect=AsyncMock(side_effect=DemoSnapshotError(
+        'private account',stage='account_config',kind='validation_failed')))
+    with pytest.raises(setup.SetupBlocked): asyncio.run(setup.startup_snapshot(reader))
+    assert reader.collect.await_count==1
+
+
+def test_startup_snapshot_diagnostics_reach_final_control_report(monkeypatch,capsys):
+    monkeypatch.setattr(setup,'persistent_storage',lambda path:None)
+    from okx_demo_control_runner import safe_report
+    monkeypatch.setattr(setup,'credentials',lambda:DemoCredentials('test','test','test'))
+    def fail(*args,**kwargs):
+        raise setup.SetupBlocked('demo_full_snapshot_inconsistent_or_expired',diagnostics={
+            'snapshot_stage':'snapshot_consistency','snapshot_issue':'snapshot_changed',
+            'failure_kind':'validation_failed','read_attempts':3})
+    monkeypatch.setattr(setup,'prepare',fail)
+    assert setup.main(['--check'])==2
+    result=safe_report(json.loads(capsys.readouterr().out))
+    assert result['read_diagnostics']['snapshot_issue']=='snapshot_changed'
+    assert result['read_diagnostics']['read_attempts']==3

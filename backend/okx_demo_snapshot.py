@@ -19,8 +19,8 @@ from okx_strategy_bridge import timestamp
 PENDING_ALGO_STATES=frozenset({'live','pause','partially_effective','partially_failed'})
 
 class DemoSnapshotError(RuntimeError):
-    def __init__(self,message,*,stage='unknown',kind='unavailable'):
-        super().__init__(message);self.stage=stage;self.kind=kind
+    def __init__(self,message,*,stage='unknown',kind='unavailable',issue='unknown'):
+        super().__init__(message);self.stage=stage;self.kind=kind;self.issue=issue
 
 
 def digits(value):
@@ -176,6 +176,7 @@ class DemoSnapshotReader:
     async def collect(self):
         self.last_snapshot = None
         stage='snapshot_start'
+        issue='unknown'
         try:
             start = timestamp(self.clock())
             async with asyncio.timeout(5):
@@ -192,7 +193,11 @@ class DemoSnapshotReader:
             if self.recovery_only and (first['cash'] is None or second['cash'] is None):
                 raise ValueError('Recovery requires verified cash balance')
             stable=lambda data:{k:v for k,v in data.items() if not self.recovery_only or k not in {'equity','available'}}
-            if stable(first) != stable(second) or not 0 <= end - start <= 5000:
+            if not 0 <= end - start <= 5000:
+                issue='snapshot_expired'
+                raise ValueError("Account changed or scan expired")
+            if stable(first) != stable(second):
+                issue='snapshot_changed'
                 raise ValueError("Account changed or scan expired")
             snapshot = {"account_scope":self.scope, "symbol":self.symbol,
                 "demo_verified":True, "complete":True, "monitor_healthy":True,
@@ -210,4 +215,4 @@ class DemoSnapshotReader:
             return snapshot
         except Exception as error:
             from okx_demo_read_errors import failure_kind
-            raise DemoSnapshotError("Demo account snapshot unavailable or inconsistent",stage=stage,kind=failure_kind(error)) from None
+            raise DemoSnapshotError("Demo account snapshot unavailable or inconsistent",stage=stage,kind=failure_kind(error),issue=issue) from None

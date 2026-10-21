@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-from okx_demo_snapshot import DemoSnapshotReader,digits,PENDING_ALGO_STATES
+from okx_demo_snapshot import DemoSnapshotReader,DemoSnapshotError,digits,PENDING_ALGO_STATES
 from okx_demo_transport import DemoCredentials,OKXDemoReadTransport,DemoTransportError
 from okx_demo_trading_worker import execute
 from okx_reconcile import number
@@ -228,7 +228,7 @@ async def account_check(creds,binding=None,*,recovery_only=False):
         stage='demo_recent_fills_inventory_invalid'
         await reader._scan('fills')
         stage='demo_full_snapshot_inconsistent_or_expired'
-        snapshot=await reader.collect()
+        snapshot=await startup_snapshot(reader)
         if snapshot['order_permission_verified'] is not True:
             raise SetupBlocked('demo_trade_permission_missing')
         flat=(not snapshot['pending_orders'] and not snapshot['pending_algos']
@@ -241,6 +241,29 @@ async def account_check(creds,binding=None,*,recovery_only=False):
         raise SetupBlocked(stage+suffix) from None
     except Exception:
         raise SetupBlocked(stage) from None
+
+
+async def startup_snapshot(reader):
+    """Repeat only complete GET snapshots; never reuse partial/expired evidence."""
+    for attempt in range(1,4):
+        try:
+            return await reader.collect()
+        except DemoSnapshotError as error:
+            retryable=(error.kind in {'timeout','transport_failure'} or
+                (error.stage=='snapshot_consistency' and error.kind=='validation_failed'))
+            if retryable and attempt<3:
+                await asyncio.sleep(0.25)
+                continue
+            stages={'snapshot_start','account_config','inventory_first_pass',
+                'inventory_second_pass','snapshot_consistency'}
+            kinds={'timeout','transport_failure','validation_failed','ledger_read_error',
+                'multiple_read_failures','unavailable'}
+            issues={'snapshot_expired','snapshot_changed'}
+            raise SetupBlocked('demo_full_snapshot_inconsistent_or_expired',diagnostics={
+                'snapshot_stage':error.stage if error.stage in stages else 'unknown',
+                'failure_kind':error.kind if error.kind in kinds else 'unavailable',
+                'snapshot_issue':error.issue if error.issue in issues else 'unknown',
+                'read_attempts':attempt}) from None
 
 
 def prepare(root,creds,*,require_binding=False,recovery_only=False):
@@ -333,7 +356,7 @@ def main(argv=None):
     except SetupBlocked as error:
         result.update(phase='blocked',reason=error.args[0]); code=2
         if error.diagnostics is not None:
-            result['read_diagnostics' if args.audit_trade else 'algo_diagnostics']=error.diagnostics
+            result['read_diagnostics' if args.audit_trade or 'snapshot_stage' in error.diagnostics else 'algo_diagnostics']=error.diagnostics
     except KeyboardInterrupt:
         result.update(phase='interrupted_reconciliation_required'); code=130
     except Exception:
