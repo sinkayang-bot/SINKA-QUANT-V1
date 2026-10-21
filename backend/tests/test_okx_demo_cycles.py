@@ -242,6 +242,46 @@ class CycleTests(unittest.TestCase):
             self.cycles.audit_idle(raw,bills,resume_idle=True)
         self.assertEqual(raised.exception.audit_stage,'archived_idle_window')
 
+    def test_archive_age_over_48h_resumes_from_real_prior_audit(self):
+        self.roll(); db=self.t.journal.db
+        tables=('demo_cycle_archive','demo_cash_baseline','demo_audit_fills',
+            'demo_daily','demo_risk_entry','demo_risk_close')
+        before={table:db.execute('SELECT * FROM '+table).fetchall() for table in tables}
+        self.t.now=self.boundary+36*60*60*1000; self.t.authority.acquire()
+        raw,bills=self.idle()
+        self.cycles.audit_idle(raw,bills,resume_idle=True)
+        self.t.now=self.boundary+int(51.13*60*60*1000); self.t.authority.acquire()
+        raw,bills=self.idle()
+        proof=self.cycles.audit_idle(raw,bills,resume_idle=True)
+        self.assertTrue(proof['fill_audit_ready'])
+        self.assertEqual(before,{table:db.execute('SELECT * FROM '+table).fetchall() for table in tables})
+        self.assertEqual(db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0],self.boundary)
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_idle_resume').fetchone()[0],2)
+
+    def test_old_archive_still_requires_bounded_complete_original_evidence(self):
+        for change in ('long_gap','bill_retention','anchor','fill','bill','cash'):
+            with self.subTest(change=change):
+                self.setUp(); self.roll(); db=self.t.journal.db
+                self.t.now=self.boundary+36*60*60*1000; self.t.authority.acquire()
+                raw,bills=self.idle(); self.cycles.audit_idle(raw,bills,resume_idle=True)
+                self.t.now=self.boundary+int(51.13*60*60*1000)
+                if change=='long_gap': self.t.now=self.boundary+85*60*60*1000
+                if change=='bill_retention': self.t.now=self.boundary+7*24*60*60*1000+1
+                # A recent successful audit cannot extend endpoint retention.
+                if change=='bill_retention':
+                    db.execute('UPDATE demo_fill_audit_meta SET last_checked=?',(self.t.now-7200000,))
+                self.t.authority.acquire(); raw,bills=self.idle()
+                if change=='anchor': raw['recent_fills']=[]
+                if change=='fill': raw['recent_fills'].append(self.t.fill(billId='999',tradeId='999',ordId='999'))
+                if change=='bill':
+                    for pages in bills['passes']: pages[0]['data']=[{}]
+                if change=='cash': raw['cash_balance_usdt']='1'
+                before=db.execute('SELECT * FROM demo_fill_audit_meta').fetchall()
+                with self.assertRaises(DemoFillAuditError):
+                    self.cycles.audit_idle(raw,bills,resume_idle=True)
+                self.assertEqual(before,db.execute('SELECT * FROM demo_fill_audit_meta').fetchall())
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM demo_idle_resume').fetchone()[0],1)
+
     def test_next_day_resume_still_rejects_activity_and_missing_anchor(self):
         for change in ('cash','bill','fill','anchor','order','algo','position'):
             with self.subTest(change=change):

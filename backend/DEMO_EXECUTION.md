@@ -778,13 +778,23 @@ credential retrieval or cloud deployment was performed.
 
 ### Archived idle restart window
 
-An explicitly requested `--resume-idle` can verify an archived flat cycle up to
-48 hours after its original archive boundary. The never-traded initial cycle
+An explicitly requested `--resume-idle` can verify an archived flat cycle after
+an interruption of up to 48 hours since its last successful audit. Archive age
+alone does not restart this interruption clock or invalidate an earlier audit.
+The original archive boundary must still fit the bill reader's seven-day
+interval; missing recent-fill anchors still block recovery independently.
+The never-traded initial cycle
 retains its 12-hour limit. This is a bounded GET-only catch-up, not a new baseline:
 the archive chain, original fill anchor and immutable known fills, exact cash,
 flat inventory, no pending orders/algos, and two empty account-wide bill scans
 must all pass. No cash tolerance, ledger reset, or order retry is added. Missing
-historical evidence or an older baseline still blocks entry.
+historical evidence or a baseline outside the bill interval still blocks entry.
+
+Regression coverage includes a real successful audit at archive age 36 hours,
+then a second resume at age 51.13 hours. The original baseline, fills, cash,
+archive and risk records remain unchanged. Gaps over 48 hours, bill intervals
+over seven days, missing anchors, unknown fills, bills and cash changes remain
+blocked. These offline tests do not establish cloud acceptance or send orders.
 
 Idle audit failures now expose a fixed `audit_stage` label through the control
 runner, including `archived_idle_window`, `idle_baseline`, `idle_bills`, or

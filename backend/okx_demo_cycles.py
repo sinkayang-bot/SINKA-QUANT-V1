@@ -18,8 +18,9 @@ CYCLE_TABLES=('demo_intent','demo_execution','demo_entry_context','demo_fill_aud
     'demo_close_context','demo_cash_baseline','demo_account_bill','demo_closed_trade',
     'demo_trade_settlement','demo_audit_receipt')
 
-# Stay below the recent-fill endpoint's three-day retention. Archived idle
-# recovery still requires the original anchor, exact cash and two empty bill scans.
+# Maximum interruption since the last successful audit, not archive age.
+# Original-baseline bills remain bounded by bill_route; retained fill anchors,
+# exact cash and two complete empty bill scans are independently required.
 ARCHIVED_IDLE_RESUME_MS = 48 * 60 * 60 * 1000
 
 
@@ -154,9 +155,13 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
             return self._untouched_gap(meta,state,now)
         # Resume only the idle baseline created by a verified archive. Never
         # replace that baseline, erase risk, or adopt activity during the gap.
-        if (meta[0]!=state[2] or not 0<=now-meta[0]<=ARCHIVED_IDLE_RESUME_MS
+        if (meta[0]!=state[2] or not 0<=now-meta[0]
                 or not MAX_AUDIT_GAP_MS<now-meta[1]<=ARCHIVED_IDLE_RESUME_MS):
             raise DemoIdleAuditError('archived_idle_window')
+        try:
+            bill_route(meta[0],now)
+        except ValueError:
+            raise DemoIdleAuditError('archived_idle_window') from None
         latest=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive WHERE sequence=?',(state[0],)).fetchone()[0])
         if money(latest['verification']['cash_usdt'])!=cash:
             raise ValueError('Archived cash baseline mismatch')

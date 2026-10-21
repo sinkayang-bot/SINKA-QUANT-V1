@@ -83,6 +83,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result['orders_sent'],0)
         self.t.now+=24*60*60*1000; self.f.now=self.t.now
         result=self.run_once(resume_idle=True)
+        self.assertEqual(result['phase'],'idle_verified')
+        self.assertEqual(result['orders_sent'],0)
+        self.t.now+=48*60*60*1000+1; self.f.now=self.t.now
+        result=self.run_once(resume_idle=True)
         self.assertEqual(result['phase'],'blocked')
         self.assertEqual(result['audit_stage'],'archived_idle_window')
         self.assertEqual(result['failure_kind'],'validation_failed')
