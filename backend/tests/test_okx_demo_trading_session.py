@@ -108,6 +108,34 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.f.posts,[])
         self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
 
+    async def test_entry_idle_failure_retains_exact_stage_without_private_text(self):
+        from okx_demo_cycles import DemoIdleAuditError
+        with patch.object(self.cycles,'audit_idle',side_effect=DemoIdleAuditError('idle_cash')):
+            result=await self.session.enter(args())
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(result['entry_stage'],'entry_idle_audit')
+        self.assertEqual(result['audit_stage'],'idle_cash')
+        self.assertEqual(self.f.posts,[])
+        self.assertIsNone(self.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+
+    async def test_plan_freshness_failure_is_distinguished_from_account_audit(self):
+        with patch('okx_demo_trading_session.plan_strategy_signal',side_effect=ValueError('Stale or future source')):
+            result=await self.session.enter(args())
+        self.assertEqual(result['entry_stage'],'entry_plan')
+        self.assertEqual(result['plan_rejection'],'source_freshness')
+        self.assertEqual(result['audit_stage'],'unknown')
+        self.assertEqual(self.f.posts,[])
+
+    async def test_bill_failure_preserves_nested_stage_and_hides_exception_text(self):
+        from okx_demo_bill_reader import DemoBillReadError
+        with patch('okx_demo_trading_session.DemoBillReader.collect',side_effect=DemoBillReadError(
+                'private-server-value',stage='bill_consistency',kind='validation_failed')):
+            result=await self.session.enter(args())
+        self.assertEqual(result['entry_stage'],'entry_bill_read')
+        self.assertEqual(result['read_stage'],'bill_consistency')
+        self.assertNotIn('private-server-value',json.dumps(result))
+        self.assertEqual(self.f.posts,[])
+
     async def test_full_entry_checks_native_protection_and_cannot_duplicate(self):
         result=await self.session.enter(args())
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')

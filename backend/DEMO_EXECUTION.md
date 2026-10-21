@@ -803,3 +803,5 @@ retains the selected instrument, strategy and scan tick. No account amounts,
 raw exception messages or credentials are added. Rejected candidates create
 no intent or order. Earlier runs did not retain these measurements and cannot
 be diagnosed retrospectively from the aggregate counter alone.
+
+Entry failure diagnosis: `entry_stage` separates archive verification, bill reads, idle audit, snapshot admission, planning, reservation and final revalidation. `audit_stage` and `read_stage` preserve fixed substage labels. `plan_rejection=source_freshness` identifies the planner freshness check rather than incorrectly implying a cash mismatch. No exception text, credentials or exchange response bodies are reported. These diagnostics do not change admission or dispatch behavior.

@@ -14,7 +14,7 @@ import re
 
 from okx_demo_read_errors import failure_kind
 from okx_demo_bill_reader import DemoBillReader
-from okx_demo_cycles import DemoCycleLifecycle,unresolved_emergency_exit
+from okx_demo_cycles import DemoCycleLifecycle,DemoIdleAuditError,unresolved_emergency_exit
 from okx_demo_executor import receipt
 from okx_demo_protection import assess_recovery
 from okx_demo_manual_review import protection_detail
@@ -87,12 +87,14 @@ class DemoTradingSession:
         if self.entry_stop_requested: return outcome('stop_requested')
         if self.lock.locked(): return outcome('busy')
         async with self.lock:
+            entry_stage='entry_lease'
             try:
                 if not self.authority.acquire(): return outcome('lease_busy')
                 now=self._owner()
                 if self.authority._owner(now)[5]: return outcome('kill_switch_active')
                 if unresolved_emergency_exit(self.db):
                     return outcome('emergency_exit_review_required')
+                entry_stage='entry_archive_chain'
                 self.lifecycle.verify_archive_chain()
                 if self.db.execute('SELECT 1 FROM demo_intent').fetchone():
                     return outcome('existing_intent_recovery_required')
@@ -100,8 +102,11 @@ class DemoTradingSession:
                 # The cash baseline is required; initialization is never implicit.
                 if baseline is None or not self.db.execute('SELECT 1 FROM demo_cash_baseline').fetchone():
                     return outcome('baseline_required')
+                entry_stage='entry_bill_read'
                 bundle=await DemoBillReader(self.reader).collect(begin_ms=baseline[0])
+                entry_stage='entry_idle_audit'
                 proof=self.lifecycle.audit_idle(bundle['snapshot'],bundle['bills'])
+                entry_stage='entry_accept_snapshot'
                 self.authority.accept_snapshot(proof)
                 frozen=deepcopy(source)
                 # Account amounts/specification cannot be supplied by the signal caller.
@@ -114,6 +119,7 @@ class DemoTradingSession:
                 if execution_test:
                     # The immutable archive sequence, never caller text or a random nonce.
                     frozen['test_cycle']=self.lifecycle.verify_archive_chain()[0]
+                entry_stage='entry_plan'
                 try:
                     candidate=planner(**frozen,now_ms=self._owner())
                 except ValueError as error:
@@ -137,10 +143,12 @@ class DemoTradingSession:
                     if self.authority.daily_limits_enabled and daily and now<daily[3]:
                         return outcome('entry_gate_blocked')|{'gate_reason':'risk_cooldown','retry_after_seconds':(daily[3]-now+999)//1000}
                     return outcome('entry_gate_blocked')|{'gate_reason':'account_or_plan_verification','retry_after_seconds':0}
+                entry_stage='entry_reservation'
                 client_id=self.journal.register(candidate['plan'])
                 self.journal.reserve_entry(client_id)
                 self.db.execute('INSERT INTO demo_trading_clock VALUES(?,?)',(client_id,self._owner()))
                 # No await between the final durable owner/risk check and dispatch.
+                entry_stage='entry_revalidation'
                 current=planner(**frozen,now_ms=self._owner())
                 if self.entry_stop_requested or current != candidate or not self.authority.allows(current):
                     self.journal.entry_receipt(client_id,'blocked_before_send')
@@ -161,6 +169,7 @@ class DemoTradingSession:
                         if isinstance(value,str) and re.fullmatch(r'[0-9]{1,8}',value)}
                 self.journal.entry_receipt(client_id,'acknowledged' if order_id else 'unknown',order_id)
                 # Even unknown receipts are queried using the original client ID.
+                entry_stage='entry_recovery'
                 return await self._recover(client_id)
             except asyncio.CancelledError:
                 self.halt()
@@ -168,7 +177,13 @@ class DemoTradingSession:
             except Exception as error:
                 self.halt()
                 return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,
-                    'failure_kind':failure_kind(error),
+                    'failure_kind':failure_kind(error),'entry_stage':entry_stage,
+                    'audit_stage':getattr(error,'audit_stage','unknown') if isinstance(error,DemoIdleAuditError) else 'unknown',
+                    'read_stage':getattr(error,'stage','unknown') if getattr(error,'stage',None) in {
+                        'bill_window','snapshot_before','bills_first_pass','bills_second_pass','snapshot_after','bill_consistency'} else 'unknown',
+                    'plan_rejection':{'Stale or future source':'source_freshness',
+                        'Leverage exceeds limit':'leverage_limit','Available balance exceeds verified equity':'balance_exceeds_equity',
+                        'Invalid target':'invalid_target'}.get(str(error),'unknown') if entry_stage in {'entry_plan','entry_revalidation'} else 'unknown',
                     'snapshot_stage':getattr(error,'stage',None) if getattr(error,'stage',None) in {
                         'account_config','inventory_first_pass','inventory_second_pass','snapshot_consistency'} else None,
                     'protection_diagnostics':dict(self.recovery_diagnostics)}

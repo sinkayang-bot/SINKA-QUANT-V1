@@ -108,6 +108,15 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(value['worker']['audit_stage'],'archived_idle_window')
         self.assertNotIn('secret',str(value))
 
+    def test_entry_failure_stage_survives_final_report(self):
+        value=safe_report({'worker':{'stop_diagnostics':{'phase':'blocked_reconciliation_required',
+            'entry_stage':'entry_plan','plan_rejection':'source_freshness',
+            'read_stage':'unknown','audit_stage':'unknown','raw_error':'private account'}}})
+        detail=value['worker']['stop_diagnostics']
+        self.assertEqual(detail['entry_stage'],'entry_plan')
+        self.assertEqual(detail['plan_rejection'],'source_freshness')
+        self.assertNotIn('private',str(value))
+
     def test_last_entry_block_keeps_stop_diagnostics_in_final_control_report(self):
         value=safe_report({'worker':{'phase':'stopped_no_active_intent','last_entry_block':{
             'gate_reason':'signal_stop_distance','ticks':10,'selected_symbol':'LTC-USDT-SWAP',
