@@ -107,6 +107,8 @@ class RunnerConnectionError(RuntimeError):
 
 def run(store,*,seconds=3600):
     root=Path.home()/'sinka-demo-trial'
+    from okx_demo_migration import check_source_fence
+    check_source_fence(root)
     # Existing pinned binding and ledger are mandatory; never bootstrap/reset.
     if not (root/'ledger.sqlite').is_file() or not (root/'account.json').is_file():
         raise ValueError('Existing demo account binding and ledger required')

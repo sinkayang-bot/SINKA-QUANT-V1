@@ -113,6 +113,9 @@ def credentials():
 
 def persistent_storage(root):
     """Require a mounted local disk, reject temp/overlay/network filesystems."""
+    from okx_demo_migration import check_source_fence
+    try: check_source_fence(root)
+    except ValueError: raise SetupBlocked('source_migrated_use_cloud_runner') from None
     home=Path.home().resolve()
     if root != home/'sinka-demo-trial' or root.is_symlink():
         raise SetupBlocked('dedicated_home_storage_required')

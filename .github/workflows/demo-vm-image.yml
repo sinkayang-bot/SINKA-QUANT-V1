@@ -1,0 +1,25 @@
+name: Demo VM migration image
+on:
+  push:
+    paths: ['backend/**', 'strategy/**', 'migration/**', 'firebase/migrate-demo-vm.sh', '.github/workflows/demo-vm-image.yml']
+  pull_request:
+    paths: ['backend/**', 'strategy/**', 'migration/**', 'firebase/migrate-demo-vm.sh', '.github/workflows/demo-vm-image.yml']
+permissions:
+  contents: read
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f migration/Dockerfile -t sinka-demo-vm:ci .
+      - name: Verify runtimes and default-off controller without network or credentials
+        run: |
+          docker run --rm --network none --entrypoint node sinka-demo-vm:ci --version
+          docker run --rm --network none --entrypoint gcloud sinka-demo-vm:ci version
+          docker run --rm --network none --read-only --entrypoint python sinka-demo-vm:ci backend/okx_demo_control_runner.py > "$RUNNER_TEMP/result.json"
+          python - "$RUNNER_TEMP/result.json" <<'PY'
+          import json,sys
+          result=json.load(open(sys.argv[1]))
+          assert result['phase']=='disabled'
+          assert result['live_trading_enabled'] is False
+          PY
