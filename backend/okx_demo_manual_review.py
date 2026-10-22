@@ -19,12 +19,13 @@ from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
 from okx_demo_protection import _plan_body
 from okx_demo_read_errors import failure_kind
+from okx_demo_baseline_history import recover_baseline_history,with_baseline_history
 
 
 class TradeReviewBlocked(RuntimeError):
     def __init__(self,stage,error):
         super().__init__('Trade review read failed')
-        if stage not in {'retained_ledger','reader_setup','bill_bundle','entry_lookup','exit_selection','exit_lookup','assessment','protection_detail'}:
+        if stage not in {'retained_ledger','reader_setup','baseline_history','bill_bundle','entry_lookup','exit_selection','exit_lookup','assessment','protection_detail'}:
             stage='unknown'
         self.stage=stage;self.kind=failure_kind(error)
         self.diagnostics={'stage':stage,'kind':self.kind}
@@ -225,9 +226,15 @@ async def _audit_trade_once(path,binding,creds):
         clock=lambda:int(time.time()*1000)
         transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
         reader=DemoSnapshotReader(transport,account_scope=binding['account_scope'],expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
+        stage='baseline_history'
+        # Verify account identity before historical account reads; then obtain a
+        # fresh complete bill bundle so history acquisition cannot age its proof.
+        history=(await recover_baseline_history(saved,await reader.collect(),transport,clock())
+                 if saved['baseline'] else {})
         async with asyncio.timeout(20):
             stage='bill_bundle'
             bundle=await DemoBillReader(reader).collect(begin_ms=saved['begin'])
+            bundle['snapshot']=with_baseline_history(bundle['snapshot'],saved,history,clock())
             stage='entry_lookup'
             entry=order_row(await transport.lookup_entry(saved['body']['instId'],saved['client']))
             stage='exit_selection'
@@ -237,6 +244,8 @@ async def _audit_trade_once(path,binding,creds):
             closing=order_row(await transport.lookup_child(saved['body']['instId'],next(iter(exit_ids)))) if len(exit_ids)==1 else None
             stage='assessment'
             report=assess(saved,bundle,entry,closing)
+            report['baseline_history_recovered_count']=len(history)
+            report['baseline_history_read_only']=True
         # Optional historical shape cannot invalidate an already complete audit.
         stage='protection_detail'
         try:

@@ -20,6 +20,7 @@ from okx_demo_manual_review import assess, order_row, retained_in_transaction
 from okx_demo_settlement import scan,cash_matches
 from okx_demo_snapshot import DemoSnapshotReader
 from okx_demo_transport import OKXDemoReadTransport
+from okx_demo_baseline_history import recover_baseline_history,with_baseline_history
 from okx_instruments import instrument_spec
 
 
@@ -161,6 +162,9 @@ async def close_test(path,binding,creds,*,allow_strategy=False):
         saved=retained_in_transaction(journal.db,owner.scope,allow_strategy=allow_strategy)
         transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
         reader=DemoSnapshotReader(transport,account_scope=owner.scope,expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
+        stage='baseline_history'
+        history=(await recover_baseline_history(saved,await reader.collect(),transport,clock())
+                 if saved['baseline'] else {})
         start=clock()
         stage='composite_exchange_reads'
         async with asyncio.timeout(5):
@@ -182,6 +186,7 @@ async def close_test(path,binding,creds,*,allow_strategy=False):
                 or scan(first,saved['begin'],through)!=scan(second,saved['begin'],through)):
             raise ValueError('Composite manual close reads changed')
         snapshot=deepcopy(before); snapshot['scan_finished_at_ms']=now
+        snapshot=with_baseline_history(snapshot,saved,history,now)
         bills=dict(demo_verified=True,account_scope=owner.scope,begin_ms=saved['begin'],through_ms=through,
             received_at_ms=through,query=dict(ccy='USDT',begin=str(saved['begin']),end=str(through),limit='100'),passes=[first,second])
         stage='atomic_settlement_validation'

@@ -21,6 +21,7 @@ SCHEMAS = {
     "/api/v5/trade/fills": (100, frozenset({"billId", "tradeId", "ordId", "instId", "side", "posSide",
         "fillSz", "fillPx", "fillTime", "fee", "feeCcy", "fillPnl"})),
 }
+SCHEMAS['/api/v5/trade/fills-history'] = SCHEMAS['/api/v5/trade/fills']
 
 
 def read_route(kind, *, symbol=None, algo_type=None, after=None):
@@ -37,6 +38,7 @@ def read_route(kind, *, symbol=None, algo_type=None, after=None):
         "orders": ("/api/v5/trade/orders-pending", {"limit":"100"}),
         "algos": ("/api/v5/trade/orders-algo-pending", {"ordType":algo_type, "limit":"100"}),
         "fills": ("/api/v5/trade/fills", {"instType":"SWAP", "limit":"100"}),
+        "fills_history": ("/api/v5/trade/fills-history", {"instType":"SWAP", "limit":"100"}),
     }
     if kind not in fixed:
         raise ValueError("Read operation not permitted")
@@ -44,7 +46,7 @@ def read_route(kind, *, symbol=None, algo_type=None, after=None):
         raise ValueError("Unexpected or missing symbol")
     if (kind == "algos" and algo_type not in ALGO_TYPES) or (kind != "algos" and algo_type is not None):
         raise ValueError("Unexpected or unsupported algo type")
-    if after is not None and kind not in {"orders", "algos", "fills"}:
+    if after is not None and kind not in {"orders", "algos", "fills", "fills_history"}:
         raise ValueError("Unexpected pagination")
     path, params = fixed[kind]
     if after is not None:

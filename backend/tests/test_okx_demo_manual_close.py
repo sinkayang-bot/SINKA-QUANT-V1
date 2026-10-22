@@ -211,6 +211,32 @@ class ManualCloseTests(unittest.TestCase):
         self.assertEqual(calls.count('GET snapshot'),2)
         self.assertEqual(self.db.execute('SELECT kill,expires FROM demo_authority').fetchone(),(1,0))
 
+    def test_expired_baseline_requires_exchange_recovery_before_atomic_archive(self):
+        from okx_demo_baseline_history import recover_baseline_history,with_baseline_history
+        from okx_demo_fill_audit import key,normalize_fill
+        old=deepcopy(self.snapshot['recent_fills'][0])
+        old.update(tradeId='999',billId='999',ordId='999',fillTime=str(self.saved['begin']-1000))
+        old=normalize_fill(old,self.t.now)
+        self.lifecycle._put(old,baseline=True)
+        self.saved=retained_in_transaction(self.db,self.t.authority.scope)
+        before=self.records()
+        with self.assertRaisesRegex(ValueError,'does not reconcile'): self.close()
+        self.assertEqual(before,self.records())
+        calls=[]
+        class HistoryPort:
+            async def account_read(port,kind,**kwargs):
+                calls.append(kind)
+                return dict(code='0',data=[deepcopy(old)])
+        history=asyncio.run(recover_baseline_history(self.saved,self.snapshot,HistoryPort(),self.t.now))
+        self.snapshot=with_baseline_history(self.snapshot,self.saved,history,self.t.now)
+        result=self.close()
+        self.assertEqual(result['phase'],'manual_test_closed_and_archived')
+        self.assertFalse(result['new_entry_allowed'])
+        self.assertEqual(calls,['fills_history','fills_history'])
+        archive=json.loads(self.db.execute('SELECT body FROM demo_cycle_archive').fetchone()[0])
+        self.assertTrue(any(key(json.loads(row[6]))==key(old)
+            for row in archive['records']['demo_audit_fills']['rows']))
+
     def test_cash_changes_missing_bills_changed_entry_and_stale_proof_preserve_original(self):
         for kind in ('cash','bill','identity','stale','disabled','kill','plan'):
             with self.subTest(kind=kind):
