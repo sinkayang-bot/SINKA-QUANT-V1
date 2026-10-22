@@ -26,3 +26,14 @@ test('verified closure and money are shown only when provided',()=>{
   assert.match(text,/交易歸檔：已確認/);assert.match(text,/本筆淨損益：-1.25 USDT/);
   assert.doesNotMatch(controlSummary({runner_online:true,last_result:{}}),/本筆淨損益/);
 });
+
+test('review success is explained without claiming archival or natural target exit',()=>{
+  const text=controlSummary({runner_online:true,last_result:{phase:'tracked_exit_evidence_matches',review:{
+    phase:'tracked_exit_evidence_matches',evidence_matches:true,automatic_exit_verified:true,
+    baseline_history_recovered_count:42,fees_usdt:'-0.1'}}});
+  assert.match(text,/等待結算歸檔/);assert.match(text,/成交帳單核對：已確認/);
+  assert.match(text,/自動平倉核對：已確認/);assert.match(text,/已補查舊成交：42 筆/);
+  assert.doesNotMatch(text,/尚未辨識|交易歸檔：已確認/);
+  assert.match(phaseChinese('tracked_strategy_exit_closed_and_archived'),/結算並歸檔/);
+  assert.match(phaseChinese('tracked_exit_review_required'),/尚未通過/);
+});

@@ -89,6 +89,18 @@ class ControlTests(unittest.TestCase):
         result=effective_report(value)
         self.assertEqual(result['phase'],'blocked_reconciliation_required')
         self.assertIs(result['live_trading_enabled'],False)
+    def test_review_summary_survives_without_raw_account_details(self):
+        value=safe_report({'phase':'tracked_exit_evidence_matches','review':{
+            'phase':'tracked_exit_evidence_matches','evidence_matches':True,
+            'automatic_exit_verified':True,'baseline_history_recovered_count':42,
+            'fill_count':2,'bill_count':2,'fees_usdt':'-0.1',
+            'api_key':'private-secret','data':[{'ordId':'123'}]}})
+        self.assertTrue(value['review']['evidence_matches'])
+        self.assertEqual(value['review']['baseline_history_recovered_count'],42)
+        self.assertNotIn('private-secret',str(value))
+        self.assertNotIn('ordId',str(value))
+        self.assertEqual(safe_report({'review':{'evidence_matches':'true'}}),{'review':{}})
+
     def test_executor_has_no_arbitrary_arguments(self):
         self.assertIn('--run',arguments('recover'));self.assertIn('--recover-only',arguments('recover'))
         self.assertEqual(arguments('settle'),['--close-reviewed-trade'])

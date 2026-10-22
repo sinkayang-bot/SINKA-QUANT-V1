@@ -1,4 +1,11 @@
 const phases={
+  tracked_exit_evidence_matches:'平倉成交與帳單核對通過，等待結算歸檔',
+  tracked_exit_review_required:'平倉帳單尚未通過完整核對，禁止新進場',
+  manual_close_evidence_matches:'手動平倉帳單核對通過，等待結算歸檔',
+  manual_close_review_required:'手動平倉帳單仍需核對',
+  tracked_strategy_exit_closed_and_archived:'策略平倉已核對、結算並歸檔',
+  tracked_test_exit_closed_and_archived:'測試平倉已核對、結算並歸檔',
+  manual_test_closed_and_archived:'手動平倉測試已結算並歸檔',
   ready:'已就緒，尚未啟動交易', starting:'正在啟動', waiting_for_signal:'正在掃描，等待進場訊號',
   entry_gate_blocked:'出現候選訊號，但未通過進場條件', market_preflight_blocked:'候選幣種未通過帳戶檢查',
   native_protection_verified_monitor_required:'已核對原生止損止盈，持續監控交易',
@@ -36,8 +43,8 @@ const integer=value=>Number.isSafeInteger(value)&&value>=0;
 const record=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
 
 export function controlSummary(s){
-  const result=record(s.last_result), worker=record(result.worker), closure=record(result.closure);
-  const report=Object.keys(worker).length?worker:Object.keys(closure).length?closure:result;
+  const result=record(s.last_result), worker=record(result.worker), closure=record(result.closure), review=record(result.review);
+  const report=Object.keys(worker).length?worker:Object.keys(closure).length?closure:Object.keys(review).length?review:result;
   const historical=!s.runner_online || (!s.busy && s.phase==='ready');
   const lines=[historical?'最近一次執行結果（歷史紀錄）':'本次執行結果',
     '進度：'+(Object.keys(result).length?phaseChinese(report.phase??result.phase):'尚無執行紀錄')];
@@ -54,9 +61,10 @@ export function controlSummary(s){
   if(report.selected_symbol??result.selected_symbol)lines.push('本次選定合約：'+(report.selected_symbol??result.selected_symbol));
   for(const key of ['stop_reason','gate_reason','audit_stage','reason'])if(report[key])lines.push(
     ({stop_reason:'停止原因',gate_reason:'進場受阻原因',audit_stage:'未通過的檢查',reason:'說明'})[key]+'：'+reasonChinese(report[key]));
-  const checks=[['protection_verified','止損止盈核對'],['native_protection_verified','原生保護單核對'],
+  const checks=[['evidence_matches','成交帳單核對'],['automatic_exit_verified','自動平倉核對'],['protection_verified','止損止盈核對'],['native_protection_verified','原生保護單核對'],
     ['flat_verified','平倉核對'],['ledger_archived','交易歸檔'],['test_roundtrip_verified','測試進出場核對']];
   for(const [key,label] of checks)if(key in report)lines.push(label+'：'+(report[key]===true?'已確認':'尚未確認'));
+  if(integer(report.baseline_history_recovered_count))lines.push('已補查舊成交：'+report.baseline_history_recovered_count+' 筆');
   for(const [key,label] of [['net_usdt','本筆淨損益'],['fees_usdt','本筆費用']])if(typeof report[key]==='string')lines.push(label+'：'+report[key]+' USDT');
   lines.push('持倉狀態以帳戶核對結果為準；「沒有交易意圖」不等於已確認帳戶空倉。');
   return lines.join('\n');
