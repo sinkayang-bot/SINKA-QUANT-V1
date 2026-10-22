@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && echo 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main' > /etc/apt/sources.list.d/google-cloud-sdk.list \
     && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --uid 10001 --home-dir /home/sinka --no-create-home sinka
+    && useradd --uid 10001 --home-dir /home/sinka --create-home sinka
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app
 COPY backend/requirements.txt /app/backend/requirements.txt
