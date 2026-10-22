@@ -52,6 +52,8 @@ gcloud services enable compute.googleapis.com iap.googleapis.com --project "$pro
 gcloud iam service-accounts create "$sa" --project "$project" --display-name='SINKA demo controller only' --quiet
 gcloud projects add-iam-policy-binding "$project" --member="serviceAccount:$identity" --role=roles/datastore.user --condition=None --quiet >/dev/null
 for secret in OKX_DEMO_TRADE_API_KEY OKX_DEMO_TRADE_API_SECRET OKX_DEMO_TRADE_API_PASSPHRASE; do
+  # Existing credentials() verifies ENABLED version metadata before payload access.
+  gcloud secrets add-iam-policy-binding "$secret" --project "$project" --member="serviceAccount:$identity" --role=roles/secretmanager.viewer --condition=None --quiet >/dev/null
   gcloud secrets add-iam-policy-binding "$secret" --project "$project" --member="serviceAccount:$identity" --role=roles/secretmanager.secretAccessor --condition=None --quiet >/dev/null
 done
 gcloud compute networks create "$network" --project "$project" --subnet-mode=custom --quiet

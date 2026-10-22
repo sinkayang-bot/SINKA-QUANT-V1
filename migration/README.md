@@ -13,7 +13,7 @@
 這是預算估算而非報價或費用上限，不含既有 Cloud Run、Firestore、Secret Manager、額外流量與稅。
 停止主機後，保留磁碟與固定 IP 仍計費。
 
-VM 使用專用服務帳戶，只授予專案 Firestore 資料使用權及三個既有模擬 Secret 的讀取權，
+VM 使用專用服務帳戶，只授予專案 Firestore 資料使用權及三個既有模擬 Secret 的版本資訊與內容讀取權，
 不建立或上傳服務帳戶金鑰，不設定真實交易 Secret。SSH 僅允許 IAP 網段，沒有公網 SSH 開放。
 操作者需要現有專案建立 VM／網路、管理服務帳戶與 IAM、使用 IAP／OS Login sudo 的權限。
 缺少權限、API、區域配額或名稱衝突時停止；不修改或接管既有同名資源。
