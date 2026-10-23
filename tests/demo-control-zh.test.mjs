@@ -37,3 +37,9 @@ test('review success is explained without claiming archival or natural target ex
   assert.match(phaseChinese('tracked_strategy_exit_closed_and_archived'),/結算並歸檔/);
   assert.match(phaseChinese('tracked_exit_review_required'),/尚未通過/);
 });
+test('long acceptance explains its actual worker duration without claiming a trade',()=>{
+  const text=controlSummary({runner_online:true,busy:true,last_result:{worker:{phase:'waiting_for_signal',acceptance_window:true,max_seconds:7200}}});
+  assert.match(text,/延長驗收時限：120 分鐘/);
+  assert.match(text,/不保證出現訊號或自然出場/);
+  assert.doesNotMatch(text,/測試進出場核對：已確認/);
+});

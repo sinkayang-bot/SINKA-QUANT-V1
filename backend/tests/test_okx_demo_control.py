@@ -112,7 +112,8 @@ class ControlTests(unittest.TestCase):
             args,kwargs=popen.call_args
             self.assertNotIn('shell',kwargs)
             self.assertEqual(kwargs['pass_fds'],(123,))
-            self.assertEqual(args[0][-1],'900')
+            self.assertEqual(args[0][-1],'7200')
+            self.assertIn('--acceptance-window',args[0])
 
     def test_idle_audit_diagnostic_survives_control_report_without_raw_error(self):
         value=safe_report({'worker':{'phase':'blocked','audit_stage':'archived_idle_window',

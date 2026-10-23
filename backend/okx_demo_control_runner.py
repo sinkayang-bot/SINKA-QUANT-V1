@@ -20,10 +20,10 @@ from okx_demo_control_store import FirestoreControlStore
 
 SCALARS=frozenset({'phase','stop_reason','recovery_stage','entry_stage','plan_rejection','audit_stage','failure_kind','read_stage','snapshot_stage','snapshot_issue','selected_symbol',
     'selected_strategy','strategy_profile','reason','gate_reason','stop_rejection','mode','instrument_context_source'})
-NUMBERS=frozenset({'baseline_history_recovered_count','fill_count','bill_count','ticks','ticks_observed','sequence','read_attempts','pending_algo_count','heartbeat_at',
+NUMBERS=frozenset({'max_seconds','baseline_history_recovered_count','fill_count','bill_count','ticks','ticks_observed','sequence','read_attempts','pending_algo_count','heartbeat_at',
     'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals','excluded',
     'breakout_not_met','trend_not_met','warmup','invalid_stop','deferred_candidates','cooldown_remaining_seconds'})
-BOOLS=frozenset({'evidence_matches','baseline_history_read_only','flat_verified','protection_verified','ledger_archived','automatic_exit_verified',
+BOOLS=frozenset({'acceptance_window','evidence_matches','baseline_history_read_only','flat_verified','protection_verified','ledger_archived','automatic_exit_verified',
     'native_protection_verified','strategy_trade','strategy_performance_sample','test_roundtrip_verified',
     'daily_limits_enabled','new_entry_allowed','within_deadline','snapshot_stable','order_lookup_stable',
     'order_lookup_valid','permission_verified'})
@@ -49,8 +49,8 @@ def safe_report(value,depth=0):
 
 
 def arguments(action):
-    common=['--scan-markets','20','--seconds','900']
-    return {'start':['--run','--resume-idle','--strategy-profile','expanded']+common,
+    common=['--scan-markets','20','--seconds','7200']
+    return {'start':['--run','--resume-idle','--strategy-profile','expanded','--acceptance-window']+common,
         'recover':['--run','--recover-only','--scan-markets','20','--seconds','90'],
         'audit':['--audit-trade'],'settle':['--close-reviewed-trade']}[action]
 

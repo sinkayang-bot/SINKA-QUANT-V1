@@ -286,7 +286,8 @@ def test_paused_order_still_prevents_first_account_binding(monkeypatch):
         asyncio.run(setup.account_check(DemoCredentials('test','test','test')))
 
 
-def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsys):
+@pytest.mark.parametrize('acceptance',[False,True])
+def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsys,acceptance):
     captured={}
     monkeypatch.setattr(setup,'persistent_storage',lambda path:None)
     monkeypatch.setattr(setup,'credentials',lambda:DemoCredentials('synthetic','synthetic','synthetic'))
@@ -296,7 +297,10 @@ def test_resume_flag_reaches_worker_without_resetting_baseline(monkeypatch,capsy
         captured.update(env)
         return {'phase':'stopped_no_active_intent'},0
     monkeypatch.setattr(setup,'execute',execute)
-    assert setup.main(['--run','--resume-idle','--scan-markets','20','--seconds','900'])==0
+    assert setup.main(['--run','--resume-idle','--scan-markets','20','--seconds',
+                       '7200' if acceptance else '900']+(['--acceptance-window'] if acceptance else []))==0
+    assert captured['DEMO_ACCEPTANCE_WINDOW']==('1' if acceptance else '0')
+    assert captured['DEMO_MAX_SECONDS']==('7200' if acceptance else '900')
     assert captured['DEMO_SCAN_MARKETS']=='20'
     assert captured['DEMO_RESUME_IDLE']=='1'
     assert captured['DEMO_INITIALIZE_BASELINE']=='0'
@@ -392,3 +396,17 @@ def test_startup_snapshot_diagnostics_reach_final_control_report(monkeypatch,cap
     result=safe_report(json.loads(capsys.readouterr().out))
     assert result['read_diagnostics']['snapshot_issue']=='snapshot_changed'
     assert result['read_diagnostics']['read_attempts']==3
+
+@pytest.mark.parametrize('args',[
+    ['--run','--seconds','901'],
+    ['--run','--acceptance-window','--test-entry'],
+    ['--run','--acceptance-window','--recover-only'],
+    ['--run','--acceptance-window','--initialize-baseline'],
+    ['--check','--acceptance-window'],
+])
+def test_extended_window_cannot_bypass_admission_or_reset_baseline(monkeypatch,capsys,args):
+    monkeypatch.setattr(setup,'credentials',lambda:pytest.fail('Unexpected credential access'))
+    assert setup.main(args)==2
+    result=json.loads(capsys.readouterr().out)
+    assert result['reason']=='explicit_strategy_acceptance_window_required'
+    assert not result['orders_enabled'] and not result['live_trading_enabled']

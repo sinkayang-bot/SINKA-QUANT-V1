@@ -37,6 +37,25 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.f.calls,[])
         self.assertEqual(self.f.posts,[])
 
+    async def test_long_acceptance_window_is_explicit_bounded_and_stoppable_without_entry(self):
+        with self.assertRaises(ValueError):
+            DemoTradingSupervisor(self.session,self.runner,self.supervisor.source,max_seconds=901)
+        for options in ({'max_seconds':7201},{'max_seconds':7200,'recover_only':True},
+                        {'max_seconds':90,'execution_test':True}):
+            with self.assertRaises(ValueError):
+                DemoTradingSupervisor(self.session,self.runner,self.supervisor.source,acceptance_window=True,**options)
+        long=DemoTradingSupervisor(self.session,self.runner,self.supervisor.source,
+            enabled=True,max_seconds=7200,acceptance_window=True)
+        async def source(symbol,started):
+            long.stop()
+            return None
+        long.source=source
+        result=await run_supervisor(long,{'DEMO_ARM_ENTRIES':'1'})
+        self.assertEqual(result['stop_reason'],'stop_requested')
+        self.assertTrue(result['acceptance_window'])
+        self.assertEqual(result['max_seconds'],7200)
+        self.assertEqual(self.f.posts,[])
+
     async def test_no_explicit_arm_only_verifies_and_restores_kill(self):
         result=await self.supervisor.run()
         self.assertEqual(result['phase'],'verified_but_not_armed')

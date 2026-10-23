@@ -16,7 +16,7 @@ sa=sinka-demo-runner
 identity="$sa@$project.iam.gserviceaccount.com"
 if [[ "$mode" == --plan ]]; then
   cat <<'PLAN'
-{"project":"sinka-quant","zone":"asia-east1-b","vm":"sinka-demo-runner","machine":"e2-small","boot_disk_gib":10,"data_disk_gib":10,"disk_type":"pd-standard","disk_auto_delete":false,"public_ssh":false,"iap_ssh":true,"service_account":"sinka-demo-runner","controller_restart":"systemd","strategy_round_seconds":900,"controller_session_seconds":14400,"source_fenced":true,"state":"original_sqlite_backup_and_binding","live_trading_enabled":false,"starts_new_trade":false,"new_billable_resources":true,"executed":false}
+{"project":"sinka-quant","zone":"asia-east1-b","vm":"sinka-demo-runner","machine":"e2-small","boot_disk_gib":10,"data_disk_gib":10,"disk_type":"pd-standard","disk_auto_delete":false,"public_ssh":false,"iap_ssh":true,"service_account":"sinka-demo-runner","controller_restart":"systemd","strategy_round_seconds":7200,"controller_session_seconds":14400,"source_fenced":true,"state":"original_sqlite_backup_and_binding","live_trading_enabled":false,"starts_new_trade":false,"new_billable_resources":true,"executed":false}
 PLAN
   exit 0
 fi

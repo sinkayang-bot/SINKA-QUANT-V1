@@ -22,7 +22,7 @@ from okx_strategy_bridge import STRATEGY_PREFIXES
 
 
 class DemoTradingSupervisor:
-    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False,execution_test=False,recover_only=False):
+    def __init__(self,session,reconciliation,source,*,enabled=False,max_seconds=300,poll_seconds=5,scan_markets=False,execution_test=False,recover_only=False,acceptance_window=False):
         if (type(session) is not DemoTradingSession or type(reconciliation) is not DemoReconciliationRunner
                 or reconciliation.lifecycle is not session.lifecycle
                 or type(reconciliation.reader.transport) is not OKXDemoReadTransport
@@ -31,8 +31,13 @@ class DemoTradingSupervisor:
                 or reconciliation.reader.transport.credentials!=session.broker.credentials
                 or not callable(source)):
             raise ValueError('One lifecycle, matching account readers and trusted signal source required')
-        if type(max_seconds) is not int or not 1<=max_seconds<=900:
-            raise ValueError('Explicit bounded duration required (1..900 seconds)')
+        if type(acceptance_window) is not bool:
+            raise ValueError('Explicit acceptance-window boolean required')
+        if acceptance_window and (execution_test or recover_only):
+            raise ValueError('Acceptance window is only for normal demo strategy monitoring')
+        if type(max_seconds) is not int or not 1<=max_seconds<=(7200 if acceptance_window else 900):
+            raise ValueError('Explicit bounded duration required')
+        self.acceptance_window=acceptance_window
         if type(poll_seconds) is not int or not 2<=poll_seconds<=10:
             raise ValueError('Bounded monitor interval required (2..10 seconds)')
         self.session,self.reconciliation,self.source=session,reconciliation,source

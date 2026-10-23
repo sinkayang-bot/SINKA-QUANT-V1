@@ -48,6 +48,7 @@ export function controlSummary(s){
   const historical=!s.runner_online || (!s.busy && s.phase==='ready');
   const lines=[historical?'最近一次執行結果（歷史紀錄）':'本次執行結果',
     '進度：'+(Object.keys(result).length?phaseChinese(report.phase??result.phase):'尚無執行紀錄')];
+  if(report.acceptance_window===true&&integer(report.max_seconds))lines.push('延長驗收時限：'+Math.ceil(report.max_seconds/60)+' 分鐘；到期仍會停止，不保證出現訊號或自然出場');
   const ticks=report.ticks_observed??report.ticks;
   if(integer(ticks))lines.push('已完成掃描／處理：'+ticks+' 輪');
   const scan=record(report.scan??result.scan);

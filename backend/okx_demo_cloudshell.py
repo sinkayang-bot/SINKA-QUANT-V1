@@ -303,13 +303,17 @@ def main(argv=None):
     parser.add_argument('--test-entry',action='store_true',help='One minimum-size BTC demo test through the existing worker')
     parser.add_argument('--scan-markets',type=int,choices=(1,20),default=1)
     parser.add_argument('--resume-idle',action='store_true',help='Reconcile an untouched or verified archived idle baseline up to 12 hours old; preserve daily risk')
-    parser.add_argument('--seconds',type=int,default=300,choices=range(1,901),metavar='1..900')
+    parser.add_argument('--acceptance-window',action='store_true',help='Explicit normal-strategy demo acceptance window, at most 7200 seconds; no forced test entry')
+    parser.add_argument('--seconds',type=int,default=300,choices=range(1,7201),metavar='1..7200')
     args=parser.parse_args(argv)
     result=dict(mode='demo_cloudshell_acceptance',phase='plan',secret_values_printed=False,
                 cloud_resources_changed=False,orders_enabled=False,live_trading_enabled=False)
     if not args.check and not args.run and not args.audit_trade and not args.close_reviewed_test and not args.close_reviewed_trade:
         print(json.dumps(result,sort_keys=True)); return 0
     try:
+        if (args.seconds>900 and not args.acceptance_window) or (args.acceptance_window and
+                (not args.run or args.test_entry or args.recover_only or args.initialize_baseline)):
+            raise SetupBlocked('explicit_strategy_acceptance_window_required')
         if sys.version_info<(3,11) or not hasattr(asyncio,'TaskGroup') or not hasattr(asyncio,'timeout'):
             raise SetupBlocked('python_3_11_or_newer_required')
         root=Path.home()/'sinka-demo-trial'
@@ -350,6 +354,7 @@ def main(argv=None):
                 DEMO_DAILY_LIMITS='1' if args.daily_limits else '0',
                 DEMO_STRATEGY_PROFILE=args.strategy_profile,
                 DEMO_EXECUTION_TEST='1' if args.test_entry else '0',DEMO_RECOVER_ONLY='1' if args.recover_only else '0',
+                DEMO_ACCEPTANCE_WINDOW='1' if args.acceptance_window else '0',
                 DEMO_MAX_SECONDS=str(min(args.seconds,90) if args.test_entry else args.seconds),DEMO_LEDGER_PATH=str(root/'ledger.sqlite'),
                 DEMO_ACCOUNT_SCOPE=binding['account_scope'],OKX_EXPECTED_UID=binding['uid'],
                 DEMO_SYMBOL=SYMBOL,OKX_API_KEY=creds.key,OKX_API_SECRET=creds.secret,OKX_API_PASSPHRASE=creds.passphrase)
