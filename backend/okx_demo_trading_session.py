@@ -256,7 +256,16 @@ class DemoTradingSession:
             snapshot_stable=value(before)==value(after),order_lookup_stable=first==second,
             order_lookup_valid=first.get('code')=='0' and len(first.get('data',[]))==1,
             permission_verified=before.get('order_permission_verified') is True)
-        self.recovery_diagnostics={'consistency_checks':checks}
+        # Fixed categories only: never expose positions, order IDs or balances.
+        left,right=value(before),value(after)
+        groups={'positions_stable':{'positions'},'pending_orders_stable':{'pending_orders'},
+            'pending_algos_stable':{'pending_algos'},'recent_fills_stable':{'recent_fills'},
+            'cash_balance_stable':{'cash_balance_usdt'},'instrument_stable':{'instrument'}}
+        details={name:all(left.get(k)==right.get(k) for k in keys) for name,keys in groups.items()}
+        covered=set().union(*groups.values())
+        details['other_snapshot_fields_stable']=({k:v for k,v in left.items() if k not in covered}
+            =={k:v for k,v in right.items() if k not in covered})
+        self.recovery_diagnostics={'consistency_checks':checks,'snapshot_checks':details}
         if not all(checks.values()):
             raise RecoveryConsistencyError('Changing or unverified recovery snapshot')
         raw=first['data'][0]; parsed=parse_order(raw)

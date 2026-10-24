@@ -265,6 +265,28 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.f.posts),1)
         self.assertNotIn('synthetic-key',str(result))
 
+    async def test_snapshot_difference_reports_category_and_keeps_entry_blocked(self):
+        await self.session.enter(args())
+        reader=self.session._recovery_reader()
+        original=reader.collect
+        count=0
+        async def changing():
+            nonlocal count
+            count+=1
+            snapshot=await original()
+            if count%2==0: snapshot['cash_balance_usdt']='9999'
+            return snapshot
+        with patch.object(reader,'collect',side_effect=changing), patch.object(self.session,'_recovery_reader',return_value=reader):
+            result=await self.session.recover(self.key())
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        details=result['protection_diagnostics']['snapshot_checks']
+        self.assertFalse(details['cash_balance_stable'])
+        self.assertTrue(details['positions_stable'])
+        self.assertTrue(details['other_snapshot_fields_stable'])
+        self.assertEqual(count,6)
+        self.assertEqual(len(self.f.posts),1)
+        self.assertNotIn('9999',str(result))
+
     async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
         result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')

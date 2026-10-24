@@ -84,8 +84,9 @@ class ControlTests(unittest.TestCase):
     def test_sanitizer_excludes_raw_exchange_responses_and_keys(self):
         value=safe_report({'phase':'trial_finished','api_key':'synthetic-secret','data':[{'ordId':'123'}],
             'worker':{'phase':'blocked_reconciliation_required','raw_error':'synthetic-secret',
-                'protection_diagnostics':{'consistency_checks':{'snapshot_stable':False}}}})
+                'protection_diagnostics':{'snapshot_checks':{'cash_balance_stable':False,'api_key':'synthetic-secret'},'consistency_checks':{'snapshot_stable':False}}}})
         self.assertNotIn('synthetic-secret',str(value));self.assertNotIn('ordId',str(value))
+        self.assertEqual(value['worker']['protection_diagnostics']['snapshot_checks'],{'cash_balance_stable':False})
         result=effective_report(value)
         self.assertEqual(result['phase'],'blocked_reconciliation_required')
         self.assertIs(result['live_trading_enabled'],False)

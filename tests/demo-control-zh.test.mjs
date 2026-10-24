@@ -43,3 +43,11 @@ test('long acceptance explains its actual worker duration without claiming a tra
   assert.match(text,/不保證出現訊號或自然出場/);
   assert.doesNotMatch(text,/測試進出場核對：已確認/);
 });
+
+test('unattributed close never asserts a human close and snapshot failures name only categories',()=>{
+ const text=controlSummary({runner_online:true,last_result:{review:{phase:'manual_close_evidence_matches',automatic_exit_verified:false}}});
+ assert.match(text,/出場來源尚未確認/);assert.match(text,/不能據此判定為手動平倉/);
+ assert.doesNotMatch(text,/手動平倉帳單核對通過/);
+ const failed=controlSummary({runner_online:true,last_result:{worker:{phase:'blocked_reconciliation_required',stop_diagnostics:{protection_diagnostics:{snapshot_checks:{positions_stable:false,cash_balance_stable:true}}}}}});
+ assert.match(failed,/兩次快照不一致：持倉/);assert.doesNotMatch(failed,/兩次快照不一致：現金/);
+});

@@ -1,8 +1,8 @@
 const phases={
   tracked_exit_evidence_matches:'平倉成交與帳單核對通過，等待結算歸檔',
   tracked_exit_review_required:'平倉帳單尚未通過完整核對，禁止新進場',
-  manual_close_evidence_matches:'手動平倉帳單核對通過，等待結算歸檔',
-  manual_close_review_required:'手動平倉帳單仍需核對',
+  manual_close_evidence_matches:'平倉帳單核對通過，出場來源尚未確認',
+  manual_close_review_required:'平倉帳單仍需核對，出場來源尚未確認',
   tracked_strategy_exit_closed_and_archived:'策略平倉已核對、結算並歸檔',
   tracked_test_exit_closed_and_archived:'測試平倉已核對、結算並歸檔',
   manual_test_closed_and_archived:'手動平倉測試已結算並歸檔',
@@ -65,6 +65,9 @@ export function controlSummary(s){
   const checks=[['evidence_matches','成交帳單核對'],['automatic_exit_verified','自動平倉核對'],['protection_verified','止損止盈核對'],['native_protection_verified','原生保護單核對'],
     ['flat_verified','平倉核對'],['ledger_archived','交易歸檔'],['test_roundtrip_verified','測試進出場核對']];
   for(const [key,label] of checks)if(key in report)lines.push(label+'：'+(report[key]===true?'已確認':'尚未確認'));
+  if(['manual_close_evidence_matches','manual_close_review_required'].includes(report.phase))lines.push('此核對未驗證原生停損／停利出場來源，不能據此判定為手動平倉。');
+  const snapshotChecks=record(record(record(report.stop_diagnostics).protection_diagnostics).snapshot_checks??record(report.protection_diagnostics).snapshot_checks);
+  for(const [key,label] of [['positions_stable','持倉'],['pending_orders_stable','掛單'],['pending_algos_stable','保護單'],['recent_fills_stable','近期成交'],['cash_balance_stable','現金餘額'],['instrument_stable','合約規格'],['other_snapshot_fields_stable','其他帳戶欄位']])if(snapshotChecks[key]===false)lines.push('兩次快照不一致：'+label);
   if(integer(report.baseline_history_recovered_count))lines.push('已補查舊成交：'+report.baseline_history_recovered_count+' 筆');
   for(const [key,label] of [['net_usdt','本筆淨損益'],['fees_usdt','本筆費用']])if(typeof report[key]==='string')lines.push(label+'：'+report[key]+' USDT');
   lines.push('持倉狀態以帳戶核對結果為準；「沒有交易意圖」不等於已確認帳戶空倉。');

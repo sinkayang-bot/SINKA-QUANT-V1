@@ -26,9 +26,10 @@ NUMBERS=frozenset({'max_seconds','baseline_history_recovered_count','fill_count'
 BOOLS=frozenset({'acceptance_window','evidence_matches','baseline_history_read_only','flat_verified','protection_verified','ledger_archived','automatic_exit_verified',
     'native_protection_verified','strategy_trade','strategy_performance_sample','test_roundtrip_verified',
     'daily_limits_enabled','new_entry_allowed','within_deadline','snapshot_stable','order_lookup_stable',
-    'order_lookup_valid','permission_verified'})
+    'positions_stable','pending_orders_stable','pending_algos_stable','recent_fills_stable',
+    'cash_balance_stable','instrument_stable','other_snapshot_fields_stable','order_lookup_valid','permission_verified'})
 GROUPS=frozenset({'review','worker','closure','stop_diagnostics','scan','tick_counts','entry_gate_counts',
-    'read_diagnostics','protection_diagnostics','consistency_checks','last_entry_block','entry_diagnostics'})
+    'read_diagnostics','protection_diagnostics','snapshot_checks','consistency_checks','last_entry_block','entry_diagnostics'})
 AMOUNTS=frozenset({'net_usdt','fees_usdt','realized_pnl_usdt','stop_distance_pct','min_stop_pct','max_stop_pct'})
 LABEL=re.compile(r'[A-Za-z0-9_-]{1,100}\Z')
 
