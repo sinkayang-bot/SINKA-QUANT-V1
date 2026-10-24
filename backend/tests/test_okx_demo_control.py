@@ -93,9 +93,11 @@ class ControlTests(unittest.TestCase):
     def test_review_summary_survives_without_raw_account_details(self):
         value=safe_report({'phase':'tracked_exit_evidence_matches','review':{
             'phase':'tracked_exit_evidence_matches','evidence_matches':True,
-            'automatic_exit_verified':True,'baseline_history_recovered_count':42,
+            'automatic_exit_verified':True,'native_exit_verified':True,'native_exit_stage':'verified','baseline_history_recovered_count':42,
             'fill_count':2,'bill_count':2,'fees_usdt':'-0.1',
             'api_key':'private-secret','data':[{'ordId':'123'}]}})
+        self.assertTrue(value['review']['native_exit_verified'])
+        self.assertEqual(value['review']['native_exit_stage'],'verified')
         self.assertTrue(value['review']['evidence_matches'])
         self.assertEqual(value['review']['baseline_history_recovered_count'],42)
         self.assertNotIn('private-secret',str(value))

@@ -1,4 +1,5 @@
 const phases={
+  native_exit_evidence_matches:'原生保護單出場關聯核對通過，尚未結算歸檔',
   tracked_exit_evidence_matches:'平倉成交與帳單核對通過，等待結算歸檔',
   tracked_exit_review_required:'平倉帳單尚未通過完整核對，禁止新進場',
   manual_close_evidence_matches:'平倉帳單核對通過，出場來源尚未確認',
@@ -62,10 +63,11 @@ export function controlSummary(s){
   if(report.selected_symbol??result.selected_symbol)lines.push('本次選定合約：'+(report.selected_symbol??result.selected_symbol));
   for(const key of ['stop_reason','gate_reason','audit_stage','reason'])if(report[key])lines.push(
     ({stop_reason:'停止原因',gate_reason:'進場受阻原因',audit_stage:'未通過的檢查',reason:'說明'})[key]+'：'+reasonChinese(report[key]));
-  const checks=[['evidence_matches','成交帳單核對'],['automatic_exit_verified','自動平倉核對'],['protection_verified','止損止盈核對'],['native_protection_verified','原生保護單核對'],
+  const checks=[['evidence_matches','成交帳單核對'],['automatic_exit_verified','自動平倉核對'],['protection_verified','止損止盈核對'],['native_protection_verified','原生保護單核對'],['native_exit_verified','原生停損／停利出場關聯'],
     ['flat_verified','平倉核對'],['ledger_archived','交易歸檔'],['test_roundtrip_verified','測試進出場核對']];
-  for(const [key,label] of checks)if(key in report)lines.push(label+'：'+(report[key]===true?'已確認':'尚未確認'));
-  if(['manual_close_evidence_matches','manual_close_review_required'].includes(report.phase))lines.push('此核對未驗證原生停損／停利出場來源，不能據此判定為手動平倉。');
+  for(const [key,label] of checks)if(key in report)lines.push((key==='automatic_exit_verified'&&'native_exit_verified' in report?'程式緊急平倉核對':label)+'：'+(report[key]===true?'已確認':'尚未確認'));
+  if(report.native_exit_verified===true)lines.push('已確認保護單觸發並對應帳單中的平倉訂單；此查核不會結算歸檔或開放新進場。');
+  if(report.native_exit_verified!==true&&['manual_close_evidence_matches','manual_close_review_required'].includes(report.phase))lines.push('此核對未驗證原生停損／停利出場來源，不能據此判定為手動平倉。');
   const snapshotChecks=record(record(record(report.stop_diagnostics).protection_diagnostics).snapshot_checks??record(report.protection_diagnostics).snapshot_checks);
   for(const [key,label] of [['positions_stable','持倉'],['pending_orders_stable','掛單'],['pending_algos_stable','保護單'],['recent_fills_stable','近期成交'],['cash_balance_stable','現金餘額'],['instrument_stable','合約規格'],['other_snapshot_fields_stable','其他帳戶欄位']])if(snapshotChecks[key]===false)lines.push('兩次快照不一致：'+label);
   if(integer(report.baseline_history_recovered_count))lines.push('已補查舊成交：'+report.baseline_history_recovered_count+' 筆');

@@ -220,3 +220,42 @@ def test_observed_multi_fill_cash_tail_passes_but_larger_discrepancy_stays_block
     report=assess(saved,bundle,entry,close)
     assert not report['checks']['all_bills_match_fills']
     assert not report['evidence_matches']
+
+
+def test_native_exit_review_uses_real_get_lineage_and_does_not_grant_settlement():
+    async def run():
+        from okx_demo_manual_review import review_native_exit
+        from test_okx_demo_close_reader import CloseFixture
+        f=CloseFixture(); reader=f.reader()
+        snapshot=await reader.collect()
+        saved=dict(original_plan=f.plan,order_id=f.entry['ordId'])
+        report=dict(evidence_matches=True,automatic_exit_verified=False)
+        result=await review_native_exit(reader,saved,dict(snapshot=snapshot),f.entry,f.child,report)
+        assert result==dict(native_exit_verified=True,native_exit_stage='verified')
+        assert report==dict(evidence_matches=True,automatic_exit_verified=False)
+        assert all(r.method=='GET' for r in f.calls)
+        assert '555' not in str(result) and 'synthetic-key' not in str(result)
+
+
+    import asyncio; asyncio.run(run())
+@pytest.mark.parametrize('mutation',['foreign_child','changed_cash','untriggered','failed_bills','changed_details'])
+def test_native_exit_review_rejects_unmatched_or_unstable_evidence(mutation):
+    async def run():
+        from okx_demo_manual_review import review_native_exit
+        from test_okx_demo_close_reader import CloseFixture
+        f=CloseFixture(); reader=f.reader(); snapshot=await reader.collect()
+        closing=deepcopy(f.child); evidence=True
+        if mutation=='foreign_child': closing['ordId']='999'
+        if mutation=='changed_cash': snapshot['cash_balance_usdt']='999'
+        if mutation=='untriggered': f.algo['state']='canceled'
+        if mutation=='failed_bills': evidence=False
+        if mutation=='changed_details':
+            def change(f,kind,count):
+                if kind=='child' and count==2: f.child['fee']='changed'
+            f.detail_mutate=change
+        result=await review_native_exit(reader,dict(original_plan=f.plan,order_id=f.entry['ordId']),
+            dict(snapshot=snapshot),f.entry,closing,dict(evidence_matches=evidence))
+        assert result['native_exit_verified'] is False
+        assert all(r.method=='GET' for r in f.calls)
+        if mutation=='failed_bills': assert sum(f.detail_counts.values())==0
+    import asyncio; asyncio.run(run())

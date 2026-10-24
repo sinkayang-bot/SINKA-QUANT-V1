@@ -51,3 +51,9 @@ test('unattributed close never asserts a human close and snapshot failures name 
  const failed=controlSummary({runner_online:true,last_result:{worker:{phase:'blocked_reconciliation_required',stop_diagnostics:{protection_diagnostics:{snapshot_checks:{positions_stable:false,cash_balance_stable:true}}}}}});
  assert.match(failed,/兩次快照不一致：持倉/);assert.doesNotMatch(failed,/兩次快照不一致：現金/);
 });
+
+test('native exit proof is distinct from emergency reduction and does not claim archival',()=>{
+ const text=controlSummary({runner_online:true,last_result:{review:{phase:'native_exit_evidence_matches',native_exit_verified:true,automatic_exit_verified:false}}});
+ assert.match(text,/原生停損／停利出場關聯：已確認/);
+ assert.match(text,/尚未結算歸檔/);assert.doesNotMatch(text,/出場來源尚未確認|不能據此判定/);
+});

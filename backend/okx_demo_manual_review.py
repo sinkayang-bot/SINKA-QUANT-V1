@@ -218,6 +218,33 @@ def protection_detail(saved,response):
     return result
 
 
+async def review_native_exit(reader,saved,bundle,entry,closing,report):
+    """Supplement the bill audit with strict two-pass native OCO lineage, GET only.
+
+    This never authorizes settlement or changes the reduction-only proof fields.
+    A missing native link means unverified, never evidence of a human close.
+    """
+    from okx_demo_close_reader import DemoCloseReader
+    result=dict(native_exit_verified=False,native_exit_stage='bill_evidence_required')
+    if report.get('evidence_matches') is not True or closing is None:
+        return result
+    result['native_exit_stage']='native_lineage_reads'
+    try:
+        native=await DemoCloseReader(reader).collect(saved['original_plan'],expected_entry_order_id=saved['order_id'])
+        result['native_exit_stage']='audited_order_match'
+        if (native['close']['entry']['rows']!=[entry] or native['close']['child']['rows']!=[closing]):
+            return result
+        result['native_exit_stage']='audited_snapshot_match'
+        keys=('account_scope','symbol','cash_balance_usdt','positions','pending_orders','pending_algos','instrument')
+        if any(native['snapshot'].get(k)!=bundle['snapshot'].get(k) for k in keys):
+            return result
+        result.update(native_exit_verified=True,native_exit_stage='verified')
+    except Exception:
+        # Never print exchange errors or infer a human close from unavailable data.
+        pass
+    return result
+
+
 async def _audit_trade_once(path,binding,creds):
     stage='retained_ledger'
     try:
@@ -256,6 +283,8 @@ async def _audit_trade_once(path,binding,creds):
             report['protection_detail']=protection_detail(saved,first) if first==second else dict(detail_available=False,reason='detail_changed',historical_only=True,live_protection_verified=False)
         except Exception:
             report['protection_detail']=dict(detail_available=False,reason='detail_read_unavailable',historical_only=True,live_protection_verified=False)
+        report.update(await review_native_exit(reader,saved,bundle,entry,closing,report))
+        if report['native_exit_verified']: report['phase']='native_exit_evidence_matches'
         return report
     except Exception as error:
         raise TradeReviewBlocked(stage,error) from None
