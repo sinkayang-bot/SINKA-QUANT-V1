@@ -212,7 +212,7 @@ class DemoTradingSupervisor:
                     reason='execution_test_cycle'
                     break
                 if result['phase'] not in {'waiting_for_signal','entry_gate_blocked','cycle_archived',
-                    'native_protection_verified_monitor_required','kill_switch_active','market_preflight_blocked'}:
+                    'native_protection_verified_monitor_required','native_exit_transition_pending','native_settlement_pending','kill_switch_active','market_preflight_blocked'}:
                     reason=result['phase']
                     # Preserve the original read/validation failure before cleanup
                     # changes the session stage or protection observations.

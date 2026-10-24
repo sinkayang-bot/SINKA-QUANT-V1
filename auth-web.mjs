@@ -1,4 +1,4 @@
-import {mountDemoControl} from './demo-control.mjs?v=zh-native-review-5';
+import {mountDemoControl} from './demo-control.mjs?v=zh-native-settle-6';
 import {FIREBASE_CONFIG, STATUS_API_BASE_URL} from './firebase-web-config.mjs?v=status-api-1';
 import {createStatusSession} from './readonly-session.mjs?v=clear-1';
 import {diagnosticSummary, FRONTEND_VERSION} from './readonly-diagnostics.mjs?v=clear-1';

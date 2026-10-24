@@ -1,5 +1,5 @@
 // Real OKX demo control is isolated from the browser paper simulator.
-import {phaseChinese,controlSummary,controlErrorChinese} from './demo-control-zh.mjs?v=zh-native-review-5';
+import {phaseChinese,controlSummary,controlErrorChinese} from './demo-control-zh.mjs?v=zh-native-settle-6';
 export function controlBase(value) {
   const url=new URL(value);
   if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash ||

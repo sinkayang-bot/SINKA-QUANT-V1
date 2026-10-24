@@ -35,7 +35,7 @@ class DemoProgress:
         'account_or_plan_verification','signal_expired','signal_price_drift','signal_stop_distance','minimum_size_not_funded'})
     PHASES=frozenset({'waiting_for_signal','entry_gate_blocked','cycle_archived',
         'blocked_reconciliation_required',
-        'native_protection_verified_monitor_required','kill_switch_active',
+        'native_protection_verified_monitor_required','native_exit_transition_pending','native_settlement_pending','kill_switch_active',
         'stop_requested','flat_requires_settlement','exit_acknowledged_query_required',
         'exit_unknown_no_retry','cancel_unconfirmed_no_retry',
         'unsubmitted_intent_recovery_required','disabled','supervisor_not_started','market_preflight_blocked',

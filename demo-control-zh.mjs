@@ -1,4 +1,6 @@
 const phases={
+  native_settlement_pending:'原生出場訂單已核對，等待成交帳單回報時窗後再結算',
+  native_exit_transition_pending:'帳戶快照正在變動，暫停新進場並等待重新核對（最多 15 秒）',
   native_exit_evidence_matches:'原生保護單出場關聯核對通過，尚未結算歸檔',
   tracked_exit_evidence_matches:'平倉成交與帳單核對通過，等待結算歸檔',
   tracked_exit_review_required:'平倉帳單尚未通過完整核對，禁止新進場',

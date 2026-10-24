@@ -60,6 +60,60 @@ class RunnerTests(unittest.TestCase):
 
     def run_once(self,**kwargs): return asyncio.run(self.runner.run_once(**kwargs))
 
+    def test_explicit_native_close_is_get_only_atomic_and_keeps_kill_switch(self):
+        from okx_demo_reconciliation import close_native
+        self.t.authority.release()
+        binding=dict(account_scope='synthetic-v1',uid=self.f.config['uid'])
+        with patch('time.time',return_value=self.f.now/1000), patch('okx_demo_transport.OKXDemoReadTransport',return_value=self.f.reader().transport):
+            result=asyncio.run(close_native(self.t.path,binding,object()))
+        self.assertEqual(result['phase'],'cycle_archived')
+        self.assertTrue(result['native_exit_verified']); self.assertTrue(result['ledger_archived'])
+        self.assertFalse(result['new_entry_allowed'])
+        self.assertEqual(self.t.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_risk_close').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_explicit_native_close_preserves_intent_on_unverified_lineage(self):
+        from okx_demo_reconciliation import close_native
+        self.t.authority.release(); self.f.child['algoId']='999'
+        binding=dict(account_scope='synthetic-v1',uid=self.f.config['uid'])
+        with patch('time.time',return_value=self.f.now/1000), patch('okx_demo_transport.OKXDemoReadTransport',return_value=self.f.reader().transport):
+            result=asyncio.run(close_native(self.t.path,binding,object()))
+        self.assertEqual(result['phase'],'blocked')
+        db=self.t.journal.db
+        self.assertIsNotNone(db.execute('SELECT 1 FROM demo_intent').fetchone())
+        for table in ('demo_cycle_archive','demo_risk_close','demo_closed_trade'):
+            self.assertIsNone(db.execute('SELECT 1 FROM '+table).fetchone())
+        self.assertEqual(db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_expired_baseline_is_retrieved_twice_before_fresh_native_settlement(self):
+        from okx_demo_fill_audit import normalize_fill
+        begin=self.t.journal.db.execute('SELECT baseline_at FROM demo_fill_audit_meta').fetchone()[0]
+        old=dict(self.f.fills[0],billId='50',tradeId='50',ordId='999',fillTime=str(begin-1))
+        self.t.audit._put(normalize_fill(old,self.f.now),baseline=True)
+        previous=self.f.response_override; reads=[]
+        def override(request):
+            if request.url.path=='/api/v5/trade/fills-history':
+                reads.append(request)
+                return httpx.Response(200,json={'code':'0','data':[old]})
+            return previous(request)
+        self.f.response_override=override
+        result=self.run_once()
+        self.assertEqual(result['phase'],'cycle_archived')
+        self.assertEqual(len(reads),2)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_native_close_waits_for_existing_bill_delay_without_committing(self):
+        for f in self.f.fills: f['fillTime']=str(self.f.now-1000)
+        for bill in self.f.bills:
+            if bill['type']=='2': bill['ts']=str(self.f.now-1000)
+        result=self.run_once()
+        self.assertEqual(result['phase'],'native_settlement_pending')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_closed_trade').fetchone())
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_risk_close').fetchone())
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
     def test_single_run_reads_closes_settles_archives_and_next_run_is_idle(self):
         result=self.run_once()
         self.assertEqual(result['phase'],'cycle_archived')

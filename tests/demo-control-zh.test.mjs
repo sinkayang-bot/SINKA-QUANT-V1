@@ -57,3 +57,9 @@ test('native exit proof is distinct from emergency reduction and does not claim 
  assert.match(text,/原生停損／停利出場關聯：已確認/);
  assert.match(text,/尚未結算歸檔/);assert.doesNotMatch(text,/出場來源尚未確認|不能據此判定/);
 });
+
+test('native transition and reporting delay are pending rather than successful exit',()=>{
+ assert.match(phaseChinese('native_exit_transition_pending'),/最多 15 秒/);
+ assert.match(phaseChinese('native_settlement_pending'),/等待成交帳單/);
+ assert.doesNotMatch(phaseChinese('native_exit_transition_pending'),/出場關聯核對通過/);
+});

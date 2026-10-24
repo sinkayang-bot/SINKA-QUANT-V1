@@ -410,3 +410,23 @@ def test_extended_window_cannot_bypass_admission_or_reset_baseline(monkeypatch,c
     result=json.loads(capsys.readouterr().out)
     assert result['reason']=='explicit_strategy_acceptance_window_required'
     assert not result['orders_enabled'] and not result['live_trading_enabled']
+
+
+def test_native_close_mode_never_calls_order_worker_and_requires_archival(monkeypatch,capsys):
+    import okx_demo_reconciliation as native
+    monkeypatch.setattr(setup,'persistent_storage',lambda root:None)
+    monkeypatch.setattr(setup,'credentials',lambda:object())
+    def prepare(*a,**k):
+        assert k['require_binding'] is True
+        return {'account_scope':'scope'},True
+    monkeypatch.setattr(setup,'prepare',prepare)
+    monkeypatch.setattr(setup,'execute',lambda *a,**k:pytest.fail('Order worker called'))
+    async def done(*a): return dict(phase='cycle_archived',ledger_archived=True,new_entry_allowed=False,orders_sent=0)
+    monkeypatch.setattr(native,'close_native',done)
+    assert setup.main(['--close-reviewed-native'])==0
+    result=json.loads(capsys.readouterr().out)
+    assert result['orders_enabled'] is False and result['closure']['new_entry_allowed'] is False
+    async def blocked(*a): return dict(phase='blocked',new_entry_allowed=False,orders_sent=0)
+    monkeypatch.setattr(native,'close_native',blocked)
+    assert setup.main(['--close-reviewed-native'])==2
+    assert json.loads(capsys.readouterr().out)['phase']=='blocked'

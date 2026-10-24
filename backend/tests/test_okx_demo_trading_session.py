@@ -278,7 +278,7 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
             return snapshot
         with patch.object(reader,'collect',side_effect=changing), patch.object(self.session,'_recovery_reader',return_value=reader):
             result=await self.session.recover(self.key())
-        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(result['phase'],'native_exit_transition_pending')
         details=result['protection_diagnostics']['snapshot_checks']
         self.assertFalse(details['cash_balance_stable'])
         self.assertTrue(details['positions_stable'])
@@ -286,6 +286,45 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count,6)
         self.assertEqual(len(self.f.posts),1)
         self.assertNotIn('9999',str(result))
+
+    async def test_native_transition_wait_is_bounded_and_never_submits(self):
+        await self.session.enter(args())
+        self.session.recovery_diagnostics={'consistency_checks':dict(snapshot_stable=False,
+            within_deadline=True,order_lookup_stable=True,order_lookup_valid=True,permission_verified=True)}
+        from okx_demo_trading_session import RecoveryConsistencyError
+        with patch.object(self.session,'_evidence',side_effect=RecoveryConsistencyError('private')):
+            for _ in range(3):
+                self.assertEqual((await self.session.recover(self.key()))['phase'],'native_exit_transition_pending')
+            self.assertEqual((await self.session.recover(self.key()))['phase'],'blocked_reconciliation_required')
+        self.assertEqual(len(self.f.posts),1)
+
+    async def test_native_transition_restarts_fresh_evidence_and_forced_exit_never_waits(self):
+        await self.session.enter(args())
+        from okx_demo_trading_session import RecoveryConsistencyError
+        checks=dict(snapshot_stable=False,within_deadline=True,order_lookup_stable=True,order_lookup_valid=True,permission_verified=True)
+        self.session.recovery_diagnostics={'consistency_checks':checks}
+        with patch.object(self.session,'_evidence',side_effect=RecoveryConsistencyError('private')):
+            self.assertEqual((await self.session.recover(self.key()))['phase'],'native_exit_transition_pending')
+        self.assertEqual((await self.session.recover(self.key()))['phase'],'native_protection_verified_monitor_required')
+        self.assertEqual(self.session.transition_waits,0)
+        self.session.recovery_diagnostics={'consistency_checks':checks}
+        with patch.object(self.session,'_evidence',side_effect=RecoveryConsistencyError('private')):
+            self.assertEqual((await self.session.recover(self.key(),force_exit=True))['phase'],'blocked_reconciliation_required')
+        self.assertEqual(len(self.f.posts),1)
+
+    async def test_transition_time_budget_and_permission_failure_do_not_wait(self):
+        await self.session.enter(args())
+        from okx_demo_trading_session import RecoveryConsistencyError
+        checks=dict(snapshot_stable=False,within_deadline=True,order_lookup_stable=True,order_lookup_valid=True,permission_verified=True)
+        self.session.recovery_diagnostics={'consistency_checks':checks}
+        with patch.object(self.session,'_evidence',side_effect=RecoveryConsistencyError('private')):
+            self.assertEqual((await self.session.recover(self.key()))['phase'],'native_exit_transition_pending')
+            self.f.now+=15000
+            self.assertEqual((await self.session.recover(self.key()))['phase'],'blocked_reconciliation_required')
+            self.session.transition_waits=0; self.session.transition_started=None
+            checks['permission_verified']=False
+            self.assertEqual((await self.session.recover(self.key()))['phase'],'blocked_reconciliation_required')
+        self.assertEqual(len(self.f.posts),1)
 
     async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
         result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))

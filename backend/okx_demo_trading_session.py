@@ -50,6 +50,9 @@ class DemoTradingSession:
         self.execution_test_enabled=enable_execution_test is True
         self.execution_test_diagnostics={}
         self.recovery_protection_verified=False
+        self.protected_client=None
+        self.transition_waits=0
+        self.transition_started=None
         self.recovery_stage='not_started'
         self.recovery_diagnostics={}
         if not hasattr(self.authority,'reconciliation_lock'):
@@ -195,11 +198,30 @@ class DemoTradingSession:
         async with self.lock:
             try:
                 if not self.authority.acquire(): return outcome('lease_busy')
-                return await self._recover(client_id,force_exit=force_exit)
+                result=await self._recover(client_id,force_exit=force_exit)
+                self.transition_waits=0; self.transition_started=None
+                return result
             except asyncio.CancelledError:
                 self.halt()
                 raise
             except Exception as error:
+                checks=self.recovery_diagnostics.get('consistency_checks',{})
+                # A native trigger can change inventory between complete GET passes.
+                # Wait only for this previously verified owned position; never submit
+                # from inconsistent evidence, extend a forced exit or clear its intent.
+                if (isinstance(error,RecoveryConsistencyError) and not force_exit
+                        and self.protected_client==client_id
+                        and checks.get('snapshot_stable') is False
+                        and all(checks.get(k) is True for k in ('within_deadline','order_lookup_stable',
+                            'order_lookup_valid','permission_verified'))):
+                    now=self._owner()
+                    if self.transition_started is None: self.transition_started=now
+                    if self.transition_waits<3 and 0<=now-self.transition_started<15000:
+                        self.transition_waits+=1
+                        self.authority.invalidate_snapshot()
+                        return outcome('native_exit_transition_pending')|{
+                            'recovery_stage':'evidence_consistency',
+                            'protection_diagnostics':dict(self.recovery_diagnostics)}
                 self.halt()
                 return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,
                     'failure_kind':failure_kind(error),
@@ -302,7 +324,9 @@ class DemoTradingSession:
             self.recovery_diagnostics['pending_protection']=shape
         self.db.execute('INSERT INTO demo_protection_trace(entry_id,observed_at,body) VALUES(?,?,?)',
             (client_id,self._owner(),json.dumps(self.recovery_diagnostics,sort_keys=True)))
-        if assessment['protection_verified']: self.recovery_protection_verified=True
+        if assessment['protection_verified']:
+            self.recovery_protection_verified=True
+            self.protected_client=client_id
         if assessment['reason']=='invalid_or_stale_evidence': raise ValueError('Invalid recovery evidence')
         if entry.state in ACTIVE:
             # Cancel one owned remainder, durably once. Never treat ACK as cancellation.

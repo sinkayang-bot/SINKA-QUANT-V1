@@ -14,6 +14,8 @@ from okx_demo_settlement import scan
 from okx_demo_snapshot import DemoSnapshotReader, DemoSnapshotError
 from okx_demo_read_errors import failure_kind
 from okx_strategy_bridge import timestamp
+from okx_demo_baseline_history import recover_baseline_history,with_baseline_history
+from okx_demo_manual_review import retained_in_transaction
 
 
 def status(phase,**fields):
@@ -54,6 +56,9 @@ class DemoReconciliationRunner:
                 await asyncio.sleep(0.25)
 
     async def _closed_bundle(self,plan,expected_id,begin):
+        saved=retained_in_transaction(self.db,self.authority.scope,allow_strategy=True)
+        history=(await recover_baseline_history(saved,await self.reader.collect(),self.reader.transport,
+            timestamp(self.reader.clock())) if saved['baseline'] else {})
         start=timestamp(self.reader.clock())
         body=plan['body']
         if body['instId']!=self.reader.symbol: raise ValueError('Plan/reader instrument mismatch')
@@ -73,6 +78,7 @@ class DemoReconciliationRunner:
                 or scan(bills1,begin,through)!=scan(bills2,begin,through)):
             raise ValueError('Composite read changed or expired')
         snapshot=deepcopy(before); snapshot['scan_finished_at_ms']=now
+        snapshot=with_baseline_history(snapshot,saved,history,now)
         bills=dict(demo_verified=True,account_scope=self.reader.scope,begin_ms=begin,through_ms=through,
             received_at_ms=through,query=dict(ccy='USDT',begin=str(begin),end=str(through),limit='100'),passes=[bills1,bills2])
         return dict(snapshot=snapshot,close=first,bills=bills)
@@ -130,6 +136,15 @@ class DemoReconciliationRunner:
                     if receipt is None: raise ValueError('Missing execution reservation')
                     stage='closed_read'
                     bundle=await self._verified_read(lambda:self._closed_bundle(json.loads(encoded),receipt[0],baseline[0]))
+                    # Native orders can be filled before the account bill report
+                    # has passed its existing five-second settlement delay.
+                    child=bundle['close']['child']['rows'][0]
+                    closing_fills=[f for f in bundle['snapshot']['recent_fills'] if f.get('ordId')==child['ordId']]
+                    if closing_fills:
+                        last_fill=max(int(f['fillTime']) for f in closing_fills)
+                        if 0<=bundle['bills']['through_ms']-last_fill<5000:
+                            self.last_result=status('native_settlement_pending')
+                            return deepcopy(self.last_result)
                     stage='closed_commit'
                     self.db.execute('BEGIN IMMEDIATE')
                     try:
@@ -161,3 +176,30 @@ class DemoReconciliationRunner:
                     snapshot_stage=snapshot_stage if snapshot_stage in allowed else 'unknown',
                     read_attempts=self.read_attempts)
             return deepcopy(self.last_result)
+
+
+async def close_native(path,binding,creds):
+    """Explicit native-only GET settlement. Entries remain halted."""
+    import time
+    from okx_demo_executor import DemoExecutionJournal
+    from okx_demo_authority import DemoEntryAuthority
+    from okx_demo_transport import OKXDemoReadTransport
+    if not path.is_file() or path.is_symlink(): raise ValueError('Original ledger required')
+    clock=lambda:int(time.time()*1000)
+    journal=DemoExecutionJournal(path); owner=None
+    try:
+        owner=DemoEntryAuthority(journal,account_scope=binding['account_scope'],worker_id='native-close-review',clock=clock)
+        lifecycle=DemoCycleLifecycle(owner,enable_cycle_transition=True)
+        if not owner.acquire(): raise ValueError('Another worker owns ledger')
+        owner.set_kill_switch(True)
+        saved=retained_in_transaction(journal.db,owner.scope,allow_strategy=True)
+        transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
+        reader=DemoSnapshotReader(transport,account_scope=owner.scope,expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
+        result=await DemoReconciliationRunner(lifecycle,reader,enabled=True).run_once()
+        if result['phase']=='cycle_archived':
+            result.update(native_exit_verified=True,ledger_archived=True,new_entry_allowed=False)
+        return result
+    finally:
+        try:
+            if owner is not None: owner.release()
+        finally: journal.close()
