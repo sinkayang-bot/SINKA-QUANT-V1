@@ -76,7 +76,8 @@ class DemoSettlementAuditor(DemoClosedTradeAuditor):
         cash=money(snapshot.get('cash_balance_usdt'))
         self.db.execute('INSERT INTO demo_cash_baseline VALUES(1,?)',(cash,))
 
-    def _settle_in_transaction(self,snapshot,evidence,now):
+    def _settle_in_transaction(self,snapshot,evidence,now,*,allow_historical=False):
+        if type(allow_historical) is not bool: raise ValueError('Boolean historical close mode required')
         if not self.db.in_transaction:
             raise ValueError('Atomic settlement transaction required')
         incoming=self._snapshot(snapshot,now)
@@ -166,7 +167,7 @@ class DemoSettlementAuditor(DemoClosedTradeAuditor):
             if previous!=comparable: raise ValueError('Finalized settlement changed')
             result=previous
         self.authority._record_close_in_transaction('settled:'+client_id,pnl_usdt=result['net_usdt'],
-            closed_at_ms=result['closed_at_ms'],audit_verified=True)
+            closed_at_ms=result['closed_at_ms'],audit_verified=True,allow_historical=allow_historical)
         self.db.execute('INSERT OR IGNORE INTO demo_trade_settlement VALUES(?,?)',(client_id,encoded(result)))
         return result
 

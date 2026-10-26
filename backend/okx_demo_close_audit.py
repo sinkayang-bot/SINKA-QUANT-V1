@@ -78,7 +78,8 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
     def _lineage(self, body, entry, evidence, snapshot, now):
         return validate_lineage(body,entry,evidence,snapshot,now,self.authority.scope)
 
-    def _audit_closed_in_transaction(self,snapshot,evidence,now):
+    def _audit_closed_in_transaction(self,snapshot,evidence,now,*,allow_historical=False):
+        if type(allow_historical) is not bool: raise ValueError('Boolean historical close mode required')
         if not self.db.in_transaction:
             raise ValueError('Atomic close transaction required')
         incoming=self._snapshot(snapshot,now)
@@ -91,7 +92,9 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
             if len(bound)!=1: raise ValueError('One entry specification required')
             context=bound[0]
         if (not meta or not context or context[0] != spec_digest(snapshot['instrument'])
-                or not 0 <= now-meta[1] <= MAX_AUDIT_GAP_MS
+                or not 0 <= now-meta[1]
+                or (not allow_historical and now-meta[1]>MAX_AUDIT_GAP_MS)
+                or (allow_historical and not 0<=now-meta[0]<=604800000)
                 or (meta[2] is not None and meta[2] not in incoming)):
             raise ValueError('Missing original instrument context or fill continuity')
         if (snapshot['pending_orders'] or snapshot['pending_algos']

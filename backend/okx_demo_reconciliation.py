@@ -24,7 +24,9 @@ def status(phase,**fields):
 
 
 class DemoReconciliationRunner:
-    def __init__(self,lifecycle,snapshot_reader,*,enabled=False):
+    def __init__(self,lifecycle,snapshot_reader,*,enabled=False,historical_close=False):
+        if type(historical_close) is not bool: raise ValueError('Boolean historical close mode required')
+        self.historical_close=historical_close
         if (not isinstance(lifecycle,DemoCycleLifecycle) or not isinstance(snapshot_reader,DemoSnapshotReader)
                 or lifecycle.authority.scope!=snapshot_reader.scope):
             raise ValueError('Matching persistent cycle authority and verified demo reader required')
@@ -102,6 +104,8 @@ class DemoReconciliationRunner:
             try:
                 if not self.authority.acquire():
                     self.last_result=status('lease_unavailable'); return deepcopy(self.last_result)
+                if self.historical_close and (initialize_baseline or resume_idle or not self.authority._owner(self.authority._now())[5]):
+                    raise ValueError('Historical close requires entries halted and original baseline')
                 stage='ledger_verification'
                 self.lifecycle._begin_attempt()
                 self.lifecycle.verify_archive_chain()
@@ -149,8 +153,9 @@ class DemoReconciliationRunner:
                     self.db.execute('BEGIN IMMEDIATE')
                     try:
                         now=self.authority._now(); self.authority._owner(now)
-                        self.lifecycle._audit_closed_in_transaction(bundle['snapshot'],bundle['close'],now)
-                        result=self.lifecycle._advance_cycle_in_transaction(bundle['snapshot'],bundle['bills'],now)
+                        options={'allow_historical':True} if self.historical_close else {}
+                        self.lifecycle._audit_closed_in_transaction(bundle['snapshot'],bundle['close'],now,**options)
+                        result=self.lifecycle._advance_cycle_in_transaction(bundle['snapshot'],bundle['bills'],now,**options)
                         self.db.execute('COMMIT')
                     except Exception:
                         self.db.execute('ROLLBACK'); raise
@@ -195,7 +200,7 @@ async def close_native(path,binding,creds):
         saved=retained_in_transaction(journal.db,owner.scope,allow_strategy=True)
         transport=OKXDemoReadTransport(creds,enable_demo_requests=True,clock=clock)
         reader=DemoSnapshotReader(transport,account_scope=owner.scope,expected_uid=binding['uid'],symbol=saved['body']['instId'],clock=clock)
-        result=await DemoReconciliationRunner(lifecycle,reader,enabled=True).run_once()
+        result=await DemoReconciliationRunner(lifecycle,reader,enabled=True,historical_close=True).run_once()
         if result['phase']=='cycle_archived':
             result.update(native_exit_verified=True,ledger_archived=True,new_entry_allowed=False)
         return result

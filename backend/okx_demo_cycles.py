@@ -72,11 +72,12 @@ class DemoCycleLifecycle(DemoSettlementAuditor):
         self.db.execute('INSERT OR REPLACE INTO demo_cycle_entry_receipt VALUES(1,?,?,?,?)',
             (sequence,self.authority.epoch,self.authority.session,snapshot_digest(verified)))
 
-    def _advance_cycle_in_transaction(self,snapshot,bills,now):
-        if not self.db.in_transaction or not self.enabled:
+    def _advance_cycle_in_transaction(self,snapshot,bills,now,*,allow_historical=False):
+        if type(allow_historical) is not bool or not self.db.in_transaction or not self.enabled:
             raise ValueError('Enabled atomic cycle transaction required')
         state=self.verify_archive_chain()
-        settlement=self._settle_in_transaction(snapshot,bills,now)
+        settlement=(self._settle_in_transaction(snapshot,bills,now,allow_historical=True)
+            if allow_historical is True else self._settle_in_transaction(snapshot,bills,now))
         return self._archive_settled_in_transaction(snapshot,bills,now,settlement,state)
 
     def _archive_settled_in_transaction(self,snapshot,bills,now,settlement,state):

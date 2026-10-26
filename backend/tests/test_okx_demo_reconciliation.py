@@ -114,6 +114,49 @@ class RunnerTests(unittest.TestCase):
         self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_risk_close').fetchone())
         self.assertTrue(all(r.method=='GET' for r in self.f.calls))
 
+    def historical_runner(self,days=2):
+        self.t.now+=days*86400000; self.f.now=self.t.now
+        self.t.authority.acquire(); self.t.authority.set_kill_switch(True)
+        return DemoReconciliationRunner(self.t.audit,self.f.reader(),enabled=True,historical_close=True)
+
+    def test_explicit_historical_native_close_preserves_original_risk_day(self):
+        from okx_demo_authority import day_key
+        original_day=day_key(self.t.now)
+        runner=self.historical_runner()
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'cycle_archived')
+        db=self.t.journal.db
+        closed=db.execute('SELECT closed_at FROM demo_risk_close').fetchone()[0]
+        self.assertEqual(day_key(closed),original_day)
+        self.assertNotEqual(day_key(closed),day_key(self.t.now))
+        self.assertEqual(db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_historical_mode_is_explicit_and_requires_kill_switch(self):
+        self.t.now+=2*86400000; self.f.now=self.t.now
+        self.assertEqual(self.run_once()['phase'],'blocked')
+        self.t.authority.acquire(); self.t.authority.set_kill_switch(False)
+        runner=DemoReconciliationRunner(self.t.audit,self.f.reader(),enabled=True,historical_close=True)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'blocked')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+        with self.assertRaises(ValueError):
+            DemoReconciliationRunner(self.t.audit,self.f.reader(),enabled=True,historical_close='true')
+
+    def test_historical_close_missing_bill_rolls_back_and_can_retry(self):
+        runner=self.historical_runner(); missing=self.f.bills.pop(1)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'blocked')
+        db=self.t.journal.db
+        for table in ('demo_cycle_archive','demo_risk_close','demo_closed_trade'):
+            self.assertIsNone(db.execute('SELECT 1 FROM '+table).fetchone())
+        self.assertIsNotNone(db.execute('SELECT 1 FROM demo_intent').fetchone())
+        self.f.bills.append(missing); self.f.bills.sort(key=lambda x:int(x['billId']),reverse=True)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'cycle_archived')
+
+    def test_historical_close_outside_seven_days_does_not_archive(self):
+        runner=self.historical_runner(days=8)
+        self.assertEqual(asyncio.run(runner.run_once())['phase'],'blocked')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+        self.assertIsNotNone(self.t.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+
     def test_single_run_reads_closes_settles_archives_and_next_run_is_idle(self):
         result=self.run_once()
         self.assertEqual(result['phase'],'cycle_archived')
