@@ -97,6 +97,9 @@ class DemoIntentStore:
             archived = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_cycle_archive'").fetchone()
             if archived and self.db.execute("SELECT 1 FROM demo_cycle_archive WHERE client_id=?",(client_id,)).fetchone():
                 raise ValueError("Archived signal cannot be registered or replayed")
+            no_effects=self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='demo_no_effect_archive'").fetchone()
+            if no_effects and self.db.execute('SELECT 1 FROM demo_no_effect_archive WHERE client_id=?',(client_id,)).fetchone():
+                raise ValueError('Reviewed unknown attempt cannot be replayed')
             old = self.db.execute("SELECT plan FROM demo_intent WHERE id=?", (client_id,)).fetchone()
             if old:
                 if old[0] != encoded:

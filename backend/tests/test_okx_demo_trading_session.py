@@ -337,6 +337,18 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
         self.assertEqual(len(self.f.posts),1)
 
+    async def test_normal_entry_rejection_codes_are_preserved_without_raw_messages(self):
+        from unittest.mock import AsyncMock
+        response={'code':'1','msg':'private-msg','data':[{'sCode':'51008','sMsg':'private-msg'}]}
+        with patch.object(self.transport,'place_entry',new=AsyncMock(return_value=response)) as post:
+            result=await self.session.enter(args())
+        self.assertEqual(post.await_count,1)
+        self.assertEqual(result['phase'],'blocked_reconciliation_required')
+        self.assertEqual(result['entry_diagnostics'],{'entry_api_code':'1','entry_event_code':'51008'})
+        raw=self.journal.db.execute('SELECT body FROM demo_entry_response_diagnostics').fetchone()[0]
+        self.assertEqual(json.loads(raw),result['entry_diagnostics'])
+        self.assertNotIn('private-msg',raw+str(result))
+
     async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
         result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')

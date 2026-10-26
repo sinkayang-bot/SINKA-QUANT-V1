@@ -430,3 +430,19 @@ def test_native_close_mode_never_calls_order_worker_and_requires_archival(monkey
     monkeypatch.setattr(native,'close_native',blocked)
     assert setup.main(['--close-reviewed-native'])==2
     assert json.loads(capsys.readouterr().out)['phase']=='blocked'
+
+
+def test_unfilled_resolution_is_explicit_and_never_starts_trading(monkeypatch,capsys):
+    import okx_demo_unfilled as unfilled
+    monkeypatch.setattr(setup,'persistent_storage',lambda root:None)
+    monkeypatch.setattr(setup,'credentials',lambda:object())
+    def prepare(*args,**kwargs):
+        assert kwargs['require_binding'] is True and kwargs['recovery_only'] is True
+        return {'account_scope':'synthetic'},True
+    monkeypatch.setattr(setup,'prepare',prepare)
+    monkeypatch.setattr(setup,'execute',lambda *a,**k:pytest.fail('Order worker called'))
+    async def done(*a): return dict(phase='unfilled_attempt_archived_halted',attempt_archived=True,new_entry_allowed=False,orders_sent=0)
+    monkeypatch.setattr(unfilled,'resolve_unfilled',done)
+    assert setup.main(['--resolve-unfilled'])==0
+    result=json.loads(capsys.readouterr().out)
+    assert result['orders_enabled'] is False and result['closure']['new_entry_allowed'] is False

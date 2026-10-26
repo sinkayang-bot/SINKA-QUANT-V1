@@ -294,6 +294,7 @@ def main(argv=None):
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--run',action='store_true')
     modes.add_argument('--close-reviewed-native',action='store_true',help='GET-only native OCO settlement; entries stay halted')
+    modes.add_argument('--resolve-unfilled',action='store_true',help='Explicit GET-only no-effect review; archive unknown attempt and keep entries halted')
     modes.add_argument('--audit-trade',action='store_true',help='GET-only review of the retained test, manual close, fees and cash')
     modes.add_argument('--close-reviewed-test',action='store_true',help='GET-only exchange reads and atomic local archival of the reviewed manual test close')
     modes.add_argument('--close-reviewed-trade',action='store_true',help='GET-only exact tracked strategy-reduction settlement and archival; no new orders')
@@ -309,7 +310,7 @@ def main(argv=None):
     args=parser.parse_args(argv)
     result=dict(mode='demo_cloudshell_acceptance',phase='plan',secret_values_printed=False,
                 cloud_resources_changed=False,orders_enabled=False,live_trading_enabled=False)
-    if not args.check and not args.run and not args.audit_trade and not args.close_reviewed_test and not args.close_reviewed_trade and not args.close_reviewed_native:
+    if not args.check and not args.run and not args.audit_trade and not args.close_reviewed_test and not args.close_reviewed_trade and not args.close_reviewed_native and not args.resolve_unfilled:
         print(json.dumps(result,sort_keys=True)); return 0
     try:
         if (args.seconds>900 and not args.acceptance_window) or (args.acceptance_window and
@@ -320,8 +321,13 @@ def main(argv=None):
         root=Path.home()/'sinka-demo-trial'
         persistent_storage(root)  # Reject ephemeral storage before reading any Secret.
         creds=credentials()
-        binding,flat=prepare(root,creds,require_binding=args.run or args.audit_trade or args.close_reviewed_test or args.close_reviewed_trade or args.close_reviewed_native,recovery_only=args.recover_only and args.run)
-        if args.close_reviewed_native:
+        binding,flat=prepare(root,creds,require_binding=args.run or args.audit_trade or args.close_reviewed_test or args.close_reviewed_trade or args.close_reviewed_native or args.resolve_unfilled,recovery_only=(args.recover_only and args.run) or args.resolve_unfilled)
+        if args.resolve_unfilled:
+            from okx_demo_unfilled import resolve_unfilled
+            resolved=asyncio.run(resolve_unfilled(root/'ledger.sqlite',binding,creds))
+            result.update(phase=resolved['phase'],closure=resolved)
+            code=0 if resolved.get('attempt_archived') is True else 2
+        elif args.close_reviewed_native:
             from okx_demo_reconciliation import close_native
             closed=asyncio.run(close_native(root/'ledger.sqlite',binding,creds))
             result.update(phase=closed['phase'],closure=closed)

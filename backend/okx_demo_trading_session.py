@@ -49,6 +49,7 @@ class DemoTradingSession:
         self.entry_stop_requested=False
         self.execution_test_enabled=enable_execution_test is True
         self.execution_test_diagnostics={}
+        self.entry_request_diagnostics={}
         self.recovery_protection_verified=False
         self.protected_client=None
         self.transition_waits=0
@@ -62,6 +63,8 @@ class DemoTradingSession:
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_emergency_exit ('
             'entry_id TEXT PRIMARY KEY,client_id TEXT UNIQUE NOT NULL,body TEXT NOT NULL,'
             'status TEXT NOT NULL,exchange_order_id TEXT)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS demo_entry_response_diagnostics ('
+            'entry_id TEXT PRIMARY KEY,body TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_trading_clock ('
             'entry_id TEXT PRIMARY KEY,dispatched_at INTEGER NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS demo_protection_trace ('
@@ -164,12 +167,16 @@ class DemoTradingSession:
                     order_id=receipt(response,client_id)
                 except Exception:
                     order_id=None
-                if execution_test and isinstance(response,dict):
-                    code=response.get('code');rows=response.get('data',[])
-                    subcode=rows[0].get('sCode') if len(rows)==1 else None
-                    self.execution_test_diagnostics={key:value for key,value in (
-                        ('entry_api_code',code),('entry_event_code',subcode))
+                self.entry_request_diagnostics={}
+                if isinstance(response,dict):
+                    rows=response.get('data',[])
+                    subcode=rows[0].get('sCode') if isinstance(rows,list) and len(rows)==1 and isinstance(rows[0],dict) else None
+                    self.entry_request_diagnostics={key:value for key,value in (
+                        ('entry_api_code',response.get('code')),('entry_event_code',subcode))
                         if isinstance(value,str) and re.fullmatch(r'[0-9]{1,8}',value)}
+                if execution_test: self.execution_test_diagnostics=dict(self.entry_request_diagnostics)
+                self.db.execute('INSERT INTO demo_entry_response_diagnostics VALUES(?,?)',
+                    (client_id,json.dumps(self.entry_request_diagnostics,sort_keys=True)))
                 self.journal.entry_receipt(client_id,'acknowledged' if order_id else 'unknown',order_id)
                 # Even unknown receipts are queried using the original client ID.
                 entry_stage='entry_recovery'
@@ -181,6 +188,7 @@ class DemoTradingSession:
                 self.halt()
                 return outcome('blocked_reconciliation_required')|{'recovery_stage':self.recovery_stage,
                     'failure_kind':failure_kind(error),'entry_stage':entry_stage,
+                    'entry_diagnostics':dict(self.entry_request_diagnostics),
                     'audit_stage':getattr(error,'audit_stage','unknown') if isinstance(error,DemoIdleAuditError) else 'unknown',
                     'read_stage':getattr(error,'stage','unknown') if getattr(error,'stage',None) in {
                         'bill_window','snapshot_before','bills_first_pass','bills_second_pass','snapshot_after','bill_consistency'} else 'unknown',
