@@ -18,7 +18,7 @@ from okx_demo_baseline_history import recover_baseline_history,with_baseline_his
 from okx_demo_manual_review import retained_in_transaction
 
 
-SETTLEMENT_CHECKS={'Original close baseline missing': 'original_baseline_missing',
+SETTLEMENT_CHECKS={'Close fill continuity lost':'close_fill_continuity','Original close baseline missing': 'original_baseline_missing',
  'Original contract specification missing': 'original_contract_missing',
  'Original contract specification changed': 'original_contract_changed',
  'Close audit continuity window exceeded': 'close_continuity_window',
@@ -186,6 +186,10 @@ class DemoReconciliationRunner:
                         options={'allow_historical':True} if self.historical_close else {}
                         commit_step='native_fill_audit'
                         self.lifecycle._audit_closed_in_transaction(bundle['snapshot'],bundle['close'],now,**options)
+                        # The close auditor advances last_checked at its finish.
+                        # Settlement must not compare that checkpoint to the older
+                        # transaction-start time (real clocks advance between calls).
+                        now=self.authority._now(); self.authority._owner(now)
                         commit_step='bill_settlement_and_archive'
                         result=self.lifecycle._advance_cycle_in_transaction(bundle['snapshot'],bundle['bills'],now,**options)
                         self.db.execute('COMMIT')

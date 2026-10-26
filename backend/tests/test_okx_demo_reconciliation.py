@@ -169,6 +169,30 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('private-secret',str(result))
         self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
 
+    def test_clock_advances_during_close_audit_without_false_continuity_failure(self):
+        original=self.t.audit._audit_closed_in_transaction
+        def advancing(*args,**kwargs):
+            self.t.now+=1
+            return original(*args,**kwargs)
+        with patch.object(self.t.audit,'_audit_closed_in_transaction',side_effect=advancing):
+            result=self.run_once()
+        self.assertEqual(result['phase'],'cycle_archived',result)
+        self.assertEqual(self.t.journal.db.execute('SELECT COUNT(*) FROM demo_cycle_archive').fetchone()[0],1)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_clock_advance_does_not_extend_five_second_snapshot_deadline(self):
+        original=self.t.audit._audit_closed_in_transaction
+        def advancing(*args,**kwargs):
+            self.t.now+=5001
+            return original(*args,**kwargs)
+        with patch.object(self.t.audit,'_audit_closed_in_transaction',side_effect=advancing):
+            result=self.run_once()
+        self.assertEqual(result['phase'],'blocked')
+        self.assertEqual(result['failure_check'],'snapshot_expired')
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_risk_close').fetchone())
+        self.assertIsNotNone(self.t.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
+
     def test_single_run_reads_closes_settles_archives_and_next_run_is_idle(self):
         result=self.run_once()
         self.assertEqual(result['phase'],'cycle_archived')
