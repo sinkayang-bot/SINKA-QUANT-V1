@@ -326,6 +326,17 @@ class TradingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.session.recover(self.key()))['phase'],'blocked_reconciliation_required')
         self.assertEqual(len(self.f.posts),1)
 
+    async def test_flat_recovery_keeps_existing_halt_and_forced_stop_choices(self):
+        await self.session.enter(args())
+        self.f.positions=[]; self.f.orders=[]; self.f.algos={k:[] for k in self.f.algos}
+        self.owner.set_kill_switch(True)
+        self.assertEqual((await self.session.recover(self.key()))['phase'],'flat_requires_settlement')
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.owner.set_kill_switch(False)
+        self.assertEqual((await self.session.recover(self.key(),force_exit=True))['phase'],'flat_requires_settlement')
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],1)
+        self.assertEqual(len(self.f.posts),1)
+
     async def test_fast_strategy_uses_same_native_protection_and_duplicate_guard(self):
         result=await self.session.enter(args(strategy_version='SNR-5M-FAST-1'))
         self.assertEqual(result['phase'],'native_protection_verified_monitor_required')

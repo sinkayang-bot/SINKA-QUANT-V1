@@ -31,6 +31,48 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
             self.sources.append((symbol,started)); return None
         self.supervisor=DemoTradingSupervisor(self.session,self.runner,source,enabled=True,max_seconds=1)
 
+    async def test_native_close_archives_and_next_tick_resumes_signal_scan(self):
+        from copy import deepcopy
+        from decimal import Decimal
+        self.supervisor.started_at=self.f.now
+        self.cycles.enabled=True
+        await self.session.enter(args())
+        opened=deepcopy(self.f.fills[0]); body=self.f.row
+        attached=self.f.algos['oco'][0]
+        algo=dict(attached,state='effective',ordIdList=['12346'],subAlgoIdList=[])
+        child=dict(body,ordId='12346',clOrdId='',side='sell',reduceOnly='true',
+            algoId=algo['algoId'],algoClOrdId=algo['algoClOrdId'])
+        pnl=Decimal(opened['fillSz'])*Decimal(self.f.instrument['ctVal'])
+        closed=dict(opened,billId='102',tradeId='202',ordId='12346',side='sell',
+            fillTime=str(self.f.now+1000),fillPx='102',fillPnl=str(pnl))
+        self.f.fills=[closed,opened]; self.f.positions=[]
+        self.f.algos={kind:[] for kind in self.f.algos}; self.f.orders=[]
+        self.f.balance['details'][0]['cashBal']=str(Decimal('10000')+pnl-Decimal('.002'))
+        self.f.now+=6000
+        previous=self.f.handler
+        def handler(request):
+            path=request.url.path
+            if path.endswith('/order-algo'): return httpx.Response(200,json={'code':'0','data':[algo]})
+            if path.endswith('/order') and 'ordId' in request.url.params:
+                return httpx.Response(200,json={'code':'0','data':[child]})
+            if path.endswith('/bills'):
+                rows=[dict(billId=f['billId'],ts=f['fillTime'],type='2',subType='1' if f['side']=='buy' else '2',
+                    ordId=f['ordId'],tradeId=f['tradeId'],instId=f['instId'],instType='SWAP',ccy='USDT',
+                    pnl=f['fillPnl'],fee=f['fee'],sz=f['fillSz'],px=f['fillPx'],
+                    balChg=str(Decimal(f['fillPnl'])+Decimal(f['fee']))) for f in self.f.fills]
+                rows=[r for r in rows if int(request.url.params['begin'])<=int(r['ts'])<=int(request.url.params['end'])]
+                return httpx.Response(200,json={'code':'0','data':rows})
+            return previous(request)
+        for transport in (self.session.broker,self.runner.reader.transport):
+            transport._transport=httpx.MockTransport(handler)
+        result=await self.supervisor.tick()
+        self.assertEqual(result['phase'],'cycle_archived',result)
+        self.assertEqual(self.journal.db.execute('SELECT kill FROM demo_authority').fetchone()[0],0)
+        result=await self.supervisor.tick()
+        self.assertEqual(result['phase'],'waiting_for_signal',result)
+        self.assertEqual(len(self.sources),1)
+        self.assertEqual(len(self.f.posts),1)
+
     async def test_default_disabled_supervisor_never_reads_or_arms(self):
         off=DemoTradingSupervisor(self.session,self.runner,self.supervisor.source)
         self.assertEqual((await off.run(arm_entries=True))['phase'],'disabled')

@@ -357,10 +357,16 @@ class DemoTradingSession:
             proof=self.lifecycle.audit(snapshot)
             self.authority.accept_snapshot(proof)
             return outcome('native_protection_verified_monitor_required')
+        if assessment['reason']=='flat_requires_fill_audit':
+            # Invalidate readiness until atomic bill settlement, while preserving
+            # the owner's existing stop choice. A natural close is not a stop
+            # request. Forced cleanup still halts, and never clears an old halt.
+            self.authority.invalidate_snapshot()
+            if force_exit or self.entry_stop_requested: self.halt()
+            self.recovery_stage='native_settlement_required'
+            return outcome('flat_requires_settlement')
         self.halt()
         self.recovery_stage='emergency_exit_validation'
-        if assessment['reason']=='flat_requires_fill_audit':
-            return outcome('flat_requires_settlement')
         # Reduction is allowed only for terminal, positively identified owned fills.
         if entry.state not in {'filled','canceled','mmp_canceled'} or entry.filled<=0 or snapshot['pending_orders']:
             return outcome('exposure_ambiguous_manual_review')
