@@ -91,12 +91,15 @@ class DemoClosedTradeAuditor(DemoFillAuditor):
         if bound:
             if len(bound)!=1: raise ValueError('One entry specification required')
             context=bound[0]
-        if (not meta or not context or context[0] != spec_digest(snapshot['instrument'])
-                or not 0 <= now-meta[1]
-                or (not allow_historical and now-meta[1]>MAX_AUDIT_GAP_MS)
-                or (allow_historical and not 0<=now-meta[0]<=604800000)
-                or (meta[2] is not None and meta[2] not in incoming)):
-            raise ValueError('Missing original instrument context or fill continuity')
+        if not meta: raise ValueError('Original close baseline missing')
+        if not context: raise ValueError('Original contract specification missing')
+        if context[0]!=spec_digest(snapshot['instrument']):
+            raise ValueError('Original contract specification changed')
+        if (not 0<=now-meta[1] or (not allow_historical and now-meta[1]>MAX_AUDIT_GAP_MS)
+                or (allow_historical and not 0<=now-meta[0]<=604800000)):
+            raise ValueError('Close audit continuity window exceeded')
+        if meta[2] is not None and meta[2] not in incoming:
+            raise ValueError('Original fill checkpoint unavailable')
         if (snapshot['pending_orders'] or snapshot['pending_algos']
                 or any(number(p.get('pos'),allow_negative=True) != 0 for p in snapshot['positions'])):
             raise ValueError('Flat account and complete protective cleanup required')

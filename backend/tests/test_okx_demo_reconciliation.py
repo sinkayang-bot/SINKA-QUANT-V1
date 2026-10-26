@@ -157,6 +157,18 @@ class RunnerTests(unittest.TestCase):
         self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
         self.assertIsNotNone(self.t.journal.db.execute('SELECT 1 FROM demo_intent').fetchone())
 
+    def test_commit_diagnostics_identify_fixed_rules_without_exposing_exception(self):
+        with patch.object(self.t.audit,'_audit_closed_in_transaction',side_effect=ValueError('Original contract specification changed')):
+            result=self.run_once()
+        self.assertEqual(result['failure_check'],'original_contract_changed')
+        self.assertEqual(result['commit_step'],'native_fill_audit')
+        with patch.object(self.t.audit,'_advance_cycle_in_transaction',side_effect=ValueError('private-secret-123')):
+            result=self.run_once()
+        self.assertEqual(result['failure_check'],'unclassified_validation')
+        self.assertEqual(result['commit_step'],'bill_settlement_and_archive')
+        self.assertNotIn('private-secret',str(result))
+        self.assertIsNone(self.t.journal.db.execute('SELECT 1 FROM demo_cycle_archive').fetchone())
+
     def test_single_run_reads_closes_settles_archives_and_next_run_is_idle(self):
         result=self.run_once()
         self.assertEqual(result['phase'],'cycle_archived')

@@ -19,7 +19,7 @@ import uuid
 from okx_demo_control_store import FirestoreControlStore
 
 SCALARS=frozenset({'phase','stop_reason','recovery_stage','entry_stage','plan_rejection','audit_stage','failure_kind','read_stage','snapshot_stage','snapshot_issue','selected_symbol',
-    'native_exit_stage','closure_source','selected_strategy','strategy_profile','reason','gate_reason','stop_rejection','mode','instrument_context_source'})
+    'commit_step','failure_check','native_exit_stage','closure_source','selected_strategy','strategy_profile','reason','gate_reason','stop_rejection','mode','instrument_context_source'})
 NUMBERS=frozenset({'max_seconds','baseline_history_recovered_count','fill_count','bill_count','ticks','ticks_observed','sequence','read_attempts','pending_algo_count','heartbeat_at',
     'universe','eligible','checked','no_signal','expired','prestart','fetch_failed','signals','excluded',
     'breakout_not_met','trend_not_met','warmup','invalid_stop','deferred_candidates','cooldown_remaining_seconds'})

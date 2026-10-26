@@ -18,6 +18,35 @@ from okx_demo_baseline_history import recover_baseline_history,with_baseline_his
 from okx_demo_manual_review import retained_in_transaction
 
 
+SETTLEMENT_CHECKS={'Original close baseline missing': 'original_baseline_missing',
+ 'Original contract specification missing': 'original_contract_missing',
+ 'Original contract specification changed': 'original_contract_changed',
+ 'Close audit continuity window exceeded': 'close_continuity_window',
+ 'Original fill checkpoint unavailable': 'original_fill_checkpoint',
+ 'Flat account and complete protective cleanup required': 'account_not_flat_or_cleanup_pending',
+ 'Entry receipt identity mismatch': 'entry_receipt_identity',
+ 'Exactly one owned entry supported': 'owned_entry_count',
+ 'Unowned or mismatched fill': 'unowned_or_mismatched_fill',
+ 'Recorded fill changed': 'recorded_fill_changed',
+ 'Missing or excess trade fills': 'trade_fill_quantity',
+ 'Reported realised P&L differs from fill arithmetic': 'realized_pnl_arithmetic',
+ 'Closed trade cannot change': 'closed_trade_changed',
+ 'Unsupported account/position balance movement': 'account_position_cash_movement',
+ 'Bill differs from known trade fill': 'bill_fill_mismatch',
+ 'USDT cash movement does not reconcile': 'cash_bill_mismatch',
+ 'Trade bill missing': 'trade_bill_missing',
+ 'Unknown or changed post-close fill': 'post_close_fill_changed',
+ 'Unclassified transfer, liquidation or adjustment bill': 'unclassified_bill',
+ 'Current-day completed close required': 'risk_close_day',
+ 'Close chronology or daily baseline missing': 'risk_close_chronology',
+ 'Fresh original terminal order observation required': 'terminal_entry_observation',
+ 'Unresolved or stale owned order': 'owned_order_observation',
+ 'Stale account snapshot': 'snapshot_expired',
+ 'Original cash baseline and one audited close required': 'cash_baseline_or_audited_close',
+ 'Archive chain is inconsistent': 'archive_chain',
+ 'Archive/state checkpoint mismatch': 'archive_checkpoint'}
+
+
 def status(phase,**fields):
     return dict(phase=phase,mode='demo_read_reconciliation',new_entry_allowed=False,
         exchange_submission_enabled=False,orders_sent=0,**fields)
@@ -101,6 +130,7 @@ class DemoReconciliationRunner:
             self.last_result=None
             self.read_attempts=0
             stage='lease_verification'
+            commit_step='not_started'
             try:
                 if not self.authority.acquire():
                     self.last_result=status('lease_unavailable'); return deepcopy(self.last_result)
@@ -154,7 +184,9 @@ class DemoReconciliationRunner:
                     try:
                         now=self.authority._now(); self.authority._owner(now)
                         options={'allow_historical':True} if self.historical_close else {}
+                        commit_step='native_fill_audit'
                         self.lifecycle._audit_closed_in_transaction(bundle['snapshot'],bundle['close'],now,**options)
+                        commit_step='bill_settlement_and_archive'
                         result=self.lifecycle._advance_cycle_in_transaction(bundle['snapshot'],bundle['bills'],now,**options)
                         self.db.execute('COMMIT')
                     except Exception:
@@ -179,7 +211,8 @@ class DemoReconciliationRunner:
                     audit_stage=audit_stage if audit_stage in audit_stages else 'unknown',
                     read_stage=read_stage if read_stage in allowed else 'unknown',
                     snapshot_stage=snapshot_stage if snapshot_stage in allowed else 'unknown',
-                    read_attempts=self.read_attempts)
+                    read_attempts=self.read_attempts,commit_step=commit_step,
+                    failure_check=SETTLEMENT_CHECKS.get(str(error),'unclassified_validation'))
             return deepcopy(self.last_result)
 
 
