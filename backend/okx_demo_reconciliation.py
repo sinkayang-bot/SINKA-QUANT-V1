@@ -152,8 +152,19 @@ class DemoReconciliationRunner:
                     return deepcopy(self.last_result)
                 rows=self.db.execute('SELECT id,plan,dispatched FROM demo_intent').fetchall()
                 if not rows:
+                    meta=self.db.execute('SELECT baseline_at,anchor FROM demo_fill_audit_meta WHERE singleton=1').fetchone()
+                    history={}; saved=None
+                    if meta and meta[1] is not None:
+                        baseline_row=self.db.execute('SELECT body FROM demo_audit_fills WHERE identity=? AND baseline=1',(meta[1],)).fetchone()
+                        if baseline_row is None: raise ValueError('Idle anchor missing from retained baseline')
+                        saved={'begin':meta[0],'baseline':{meta[1]:json.loads(baseline_row[0])}}
+                        stage='idle_baseline_history'
+                        initial=await self._verified_read(self.reader.collect)
+                        history=await recover_baseline_history(saved,initial,self.reader.transport,timestamp(self.reader.clock()))
                     stage='idle_read'
                     bundle=await self._verified_read(lambda:self.bill_reader.collect(begin_ms=baseline[0]))
+                    if saved is not None:
+                        bundle['snapshot']=with_baseline_history(bundle['snapshot'],saved,history,timestamp(self.reader.clock()))
                     stage='idle_audit'
                     proof=self.lifecycle.audit_idle(bundle['snapshot'],bundle['bills'],resume_idle=resume_idle)
                     self.authority.accept_snapshot(proof)

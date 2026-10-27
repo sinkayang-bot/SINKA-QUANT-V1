@@ -226,6 +226,36 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result['recovery_stage'],'idle_audit')
         self.assertTrue(all(r.method=='GET' for r in self.f.calls))
 
+    def test_idle_recovers_missing_anchor_from_two_matching_history_reads(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        self.t.now+=25*60*60*1000; self.f.now=self.t.now
+        old=sorted(deepcopy(self.f.fills),key=lambda row:int(row['billId']),reverse=True); self.f.fills=[]
+        previous=self.f.response_override; reads=[]
+        def override(request):
+            if request.url.path=='/api/v5/trade/fills-history':
+                reads.append(request)
+                return httpx.Response(200,json={'code':'0','data':old})
+            return previous(request)
+        self.f.response_override=override
+        result=self.run_once(resume_idle=True)
+        self.assertEqual(result['phase'],'idle_verified',result)
+        self.assertEqual(len(reads),2)
+        self.assertTrue(all(r.method=='GET' for r in self.f.calls))
+
+    def test_idle_missing_history_blocks_without_changing_baseline(self):
+        self.assertEqual(self.run_once()['phase'],'cycle_archived')
+        self.t.now+=25*60*60*1000; self.f.now=self.t.now
+        self.f.fills=[]
+        before=self.t.journal.db.execute('SELECT * FROM demo_fill_audit_meta').fetchone()
+        previous=self.f.response_override
+        def override(request):
+            if request.url.path=='/api/v5/trade/fills-history':
+                return httpx.Response(200,json={'code':'0','data':[]})
+            return previous(request)
+        self.f.response_override=override
+        self.assertEqual(self.run_once(resume_idle=True)['phase'],'blocked')
+        self.assertEqual(self.t.journal.db.execute('SELECT * FROM demo_fill_audit_meta').fetchone(),before)
+
     def test_idle_transient_read_recovers_with_fresh_bundle(self):
         self.assertEqual(self.run_once()['phase'],'cycle_archived')
         original=self.runner.bill_reader.collect
