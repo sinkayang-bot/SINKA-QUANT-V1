@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>OKX 合約短線觀察</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2c;--line:#26334c;--text:#edf3ff;--muted:#95a3bb;--cyan:#5eead4;--green:#34d399;--red:#fb7185;--amber:#fbbf24}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -10%,#1a2a45 0,transparent 55%),var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+    main{max-width:1040px;margin:auto;padding:42px 20px 64px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:26px}.brand{color:var(--cyan);font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}.top h1{font-size:clamp(27px,5vw,42px);letter-spacing:-.04em;line-height:1.15;margin:7px 0}.sub{color:var(--muted);margin:0}.badge{border:1px solid #35536b;color:#a7f3d0;background:#102b2b;padding:7px 11px;border-radius:999px;font-size:12px;white-space:nowrap}
+    .panel{background:linear-gradient(145deg,rgba(18,26,44,.96),rgba(14,21,37,.96));border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 15px 45px #0002}.controls{display:grid;grid-template-columns:1.1fr 1fr 1fr .8fr auto;gap:12px;align-items:end}.field label{display:block;color:var(--muted);font-size:12px;margin:0 0 6px}.field input,.field select{width:100%;background:#0b1222;color:var(--text);border:1px solid #30405c;border-radius:10px;padding:11px 12px;font:inherit;outline:none}.field input:focus,.field select:focus{border-color:var(--cyan)}button{border:0;border-radius:10px;padding:12px 18px;background:var(--cyan);color:#06221e;font-weight:800;font:inherit;cursor:pointer;white-space:nowrap}button:disabled{opacity:.6;cursor:wait}.hint{color:var(--muted);font-size:12px;margin:12px 2px 0}.status{min-height:24px;color:var(--muted);font-size:13px}.status.error{color:var(--red)}
+    .grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:14px}.card{background:#0c1424;border:1px solid var(--line);border-radius:14px;padding:17px;min-height:112px}.label{color:var(--muted);font-size:12px}.value{font-size:25px;font-weight:750;letter-spacing:-.03em;margin-top:8px;overflow-wrap:anywhere}.small{font-size:13px;color:var(--muted);margin-top:3px}.signal{font-size:21px;color:var(--cyan)}.signal.long{color:var(--green)}.signal.short{color:var(--red)}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.stats .card{min-height:90px}.stats .value{font-size:21px}.section-title{font-size:17px;margin:0 0 14px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:12px;font-weight:600}td{font-size:13px}.positive{color:var(--green)}.negative{color:var(--red)}.empty{color:var(--muted);padding:17px 0}.notice{font-size:12px;color:#bdc8d9}.notice strong{color:var(--amber)}footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
+    @media(max-width:780px){.controls{grid-template-columns:1fr 1fr}.controls button{width:100%}.grid{grid-template-columns:1fr 1fr}.grid .card:first-child{grid-column:1/-1}.stats{grid-template-columns:1fr 1fr}.top{align-items:flex-start}.badge{margin-top:8px}}
+    @media(max-width:440px){main{padding:28px 14px 45px}.panel{padding:16px}.controls{grid-template-columns:1fr 1fr}.grid{gap:9px}.card{padding:14px}.value{font-size:21px}}
+  </style>
+</head>
+<body>
+<main>
+  <header class="top"><div><div class="brand">MARKET RESEARCH · OKX</div><h1>合約短線觀察</h1><p class="sub">公開行情 · 多空訊號 · 歷史策略回測</p></div><span class="badge">只讀模式・不會下單</span></header>
+  <section class="panel" aria-label="分析設定">
+    <div class="controls">
+      <div class="field"><label for="coin">幣種</label><input id="coin" value="BTC" maxlength="12" autocomplete="off" aria-label="幣種代號"></div>
+      <div class="field"><label for="quote">計價幣</label><select id="quote"><option>USDT</option><option>USDC</option></select></div>
+      <div class="field"><label for="bar">K 線週期</label><select id="bar"><option value="1m">1 分鐘</option><option value="3m">3 分鐘</option><option value="5m" selected>5 分鐘</option><option value="15m">15 分鐘</option><option value="30m">30 分鐘</option><option value="1H">1 小時</option></select></div>
+      <div class="field"><label for="fee">單邊費率 (bps)</label><input id="fee" type="number" min="0" max="200" step="1" value="10"></div>
+      <button id="refresh" type="button">分析行情</button>
+    </div>
+    <p class="hint">預設使用 OKX USDT 永續合約；費率 10 bps = 0.10%，請改成你的實際費率。</p>
+    <p id="status" class="status" role="status" aria-live="polite">按「分析行情」讀取最新已收線 K 線。</p>
+  </section>
+  <section class="panel">
+    <div class="grid">
+      <article class="card"><div class="label">目前策略觀察</div><div id="signal" class="value signal">—</div><div id="signalNote" class="small">等待行情資料</div></article>
+      <article class="card"><div class="label">最新收盤價</div><div id="price" class="value">—</div><div id="updated" class="small">—</div></article>
+      <article class="card"><div class="label">指標讀數</div><div id="indicators" class="value" style="font-size:17px">—</div><div class="small">EMA 9 / EMA 21 · RSI 14 · ATR 14</div></article>
+    </div>
+  </section>
+  <section class="panel">
+    <h2 class="section-title">歷史回測摘要 <span id="sample" class="small"></span></h2>
+    <div class="stats">
+      <article class="card"><div class="label">已平倉筆數</div><div id="trades" class="value">—</div></article>
+      <article class="card"><div class="label">歷史勝率</div><div id="winRate" class="value">—</div></article>
+      <article class="card"><div class="label">淨報酬合計*</div><div id="netReturn" class="value">—</div></article>
+      <article class="card"><div class="label">多單 / 空單</div><div id="sides" class="value">—</div></article>
+    </div>
+    <p class="notice">* 以價格變動率加總，已扣估算雙邊手續費，<strong>未乘槓桿</strong>。樣本筆數少時，勝率不具參考性。</p>
+  </section>
+  <section class="panel">
+    <h2 class="section-title">最近已平倉交易</h2>
+    <div class="table-wrap"><table><thead><tr><th>方向</th><th>進場時間</th><th>出場時間</th><th>進場</th><th>出場</th><th>淨變動</th><th>出場原因</th></tr></thead><tbody id="tradeRows"><tr><td colspan="7" class="empty">讀取行情後顯示</td></tr></tbody></table></div>
+  </section>
+  <section class="panel notice"><strong>風險說明：</strong>這是依簡單技術規則產生的研究訊號，不是獲利保證或個人化投資建議。回測使用最多 300 根已收線 K 線，未模擬滑價、資金費、槓桿、倉位大小、強平或實際成交差異。合約可能導致快速虧損，請先用模擬盤觀察。</section>
+  <footer>行情來源：OKX 公開 API · 此頁不要求帳戶登入或 API 金鑰</footer>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const format = (n, digits=2) => Number.isFinite(n) ? n.toLocaleString('en-US',{maximumFractionDigits:digits}) : '—';
+  const time = ts => new Date(Number(ts)).toLocaleString(undefined,{hour12:false});
+  const setStatus = (message, error=false) => { $('status').textContent=message; $('status').classList.toggle('error',error); };
+  function ema(v,p){const out=Array(v.length).fill(null);if(v.length<p)return out;let x=v.slice(0,p).reduce((a,b)=>a+b,0)/p;out[p-1]=x;const a=2/(p+1);for(let i=p;i<v.length;i++){x=v[i]*a+x*(1-a);out[i]=x;}return out;}
+  function rsi(v,p=14){const out=Array(v.length).fill(null);if(v.length<=p)return out;let g=0,l=0;for(let i=1;i<=p;i++){const d=v[i]-v[i-1];g+=Math.max(d,0);l+=Math.max(-d,0);}g/=p;l/=p;const val=()=>l===0?100:100-100/(1+g/l);out[p]=val();for(let i=p+1;i<v.length;i++){const d=v[i]-v[i-1];g=(g*(p-1)+Math.max(d,0))/p;l=(l*(p-1)+Math.max(-d,0))/p;out[i]=val();}return out;}
+  function atr(cs,p=14){const out=Array(cs.length).fill(null);if(cs.length<=p)return out;const tr=[0];for(let i=1;i<cs.length;i++)tr.push(Math.max(cs[i].high-cs[i].low,Math.abs(cs[i].high-cs[i-1].close),Math.abs(cs[i].low-cs[i-1].close)));let x=tr.slice(1,p+1).reduce((a,b)=>a+b,0)/p;out[p]=x;for(let i=p+1;i<cs.length;i++){x=(x*(p-1)+tr[i])/p;out[i]=x;}return out;}
+  function analyze(cs,feeBps){const close=cs.map(c=>c.close),f=ema(close,9),s=ema(close,21),r=rsi(close),a=atr(cs),trades=[];let pos=null;
+    for(let i=1;i<cs.length;i++){if([f[i],f[i-1],s[i],s[i-1],r[i],a[i]].some(x=>x===null))continue;const c=cs[i];if(pos){let exit=null,reason='';if(pos.dir===1){if(c.low<=pos.stop){exit=pos.stop;reason='止損';}else if(c.high>=pos.target){exit=pos.target;reason='止盈';}else if(f[i]<s[i]&&f[i-1]>=s[i-1]){exit=c.close;reason='均線反轉';}}else{if(c.high>=pos.stop){exit=pos.stop;reason='止損';}else if(c.low<=pos.target){exit=pos.target;reason='止盈';}else if(f[i]>s[i]&&f[i-1]<=s[i-1]){exit=c.close;reason='均線反轉';}}
+        if(exit!==null){const net=(exit/pos.entry-1)*100*pos.dir-2*feeBps/100;trades.push({...pos,exit,exitTs:c.ts,net,reason});pos=null;}}
+      else if(f[i]>s[i]&&f[i-1]<=s[i-1]&&r[i]>=50&&r[i]<=70){pos={dir:1,entry:cs[i].close,entryTs:c.ts,stop:c.close-a[i],target:c.close+1.5*a[i]};}
+      else if(f[i]<s[i]&&f[i-1]>=s[i-1]&&r[i]>=30&&r[i]<=50){pos={dir:-1,entry:c.close,entryTs:c.ts,stop:c.close+a[i],target:c.close-1.5*a[i]};}}
+    const i=cs.length-1,c=cs[i];let signal='目前無明確訊號',kind='';if(pos){signal=`回測條件持有${pos.dir===1?'多單':'空單'}；留意止損/止盈`;kind=pos.dir===1?'long':'short';}else if(f[i]>s[i]&&r[i]>=50&&r[i]<=70){signal='偏多觀察；等待確認';kind='long';}else if(f[i]<s[i]&&r[i]>=30&&r[i]<=50){signal='偏空觀察；等待確認';kind='short';}else if(f[i]<s[i]||r[i]>70){signal='暫不追單；等待新訊號';}
+    return {cs,fast:f[i],slow:s[i],rsi:r[i],atr:a[i],signal,kind,trades};}
+  function render(result,inst,bar,fee){const {cs,fast,slow,rsi:r,atr:a,signal,kind,trades}=result,last=cs.at(-1);$('signal').textContent=signal;$('signal').className=`value signal ${kind}`;$('signalNote').textContent=`${inst} · ${bar} · 費率估算 ${fee} bps/邊`;$('price').textContent=format(last.close,6);$('updated').textContent=`收線時間 ${time(last.ts)} (本機時間)`;$('indicators').textContent=`${format(fast,2)} / ${format(slow,2)} · ${format(r,1)} · ${format(a,2)}`;
+    const wins=trades.filter(t=>t.net>0).length,rate=trades.length?wins/trades.length*100:null,total=trades.reduce((n,t)=>n+t.net,0),longs=trades.filter(t=>t.dir===1).length,shorts=trades.length-longs;$('trades').textContent=trades.length;$('winRate').textContent=rate===null?'—':`${format(rate,1)}%`;$('netReturn').textContent=trades.length?`${total>=0?'+':''}${format(total,2)}%`:'—';$('netReturn').className=`value ${total>=0?'positive':'negative'}`;$('sides').textContent=`${longs} / ${shorts}`;$('sample').textContent=`（${cs.length} 根已收線 K 線）`;
+    const rows=trades.slice(-5).reverse();$('tradeRows').innerHTML=rows.length?rows.map(t=>`<tr><td class="${t.dir===1?'positive':'negative'}">${t.dir===1?'多':'空'}</td><td>${time(t.entryTs)}</td><td>${time(t.exitTs)}</td><td>${format(t.entry,6)}</td><td>${format(t.exit,6)}</td><td class="${t.net>=0?'positive':'negative'}">${t.net>=0?'+':''}${format(t.net,3)}%</td><td>${t.reason}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">目前樣本沒有已平倉交易，無法計算勝率。</td></tr>';}
+  async function load(){const coin=$('coin').value.trim().toUpperCase(),quote=$('quote').value,bar=$('bar').value,fee=Number($('fee').value);if(!/^[A-Z0-9]{2,12}$/.test(coin)){setStatus('請輸入有效幣種代號，例如 BTC 或 ETH。',true);return;}if(!Number.isFinite(fee)||fee<0){setStatus('請輸入有效的單邊費率。',true);return;}const inst=`${coin}-${quote}-SWAP`,button=$('refresh');button.disabled=true;button.textContent='讀取中…';setStatus(`正在讀取 ${inst} ${bar} 公開行情…`);
+    try{const url=`https://www.okx.com/api/v5/market/candles?${new URLSearchParams({instId:inst,bar,limit:'300'})}`,response=await fetch(url,{cache:'no-store'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const data=await response.json();if(data.code!=='0')throw new Error(data.msg||`OKX API 錯誤 ${data.code}`);const cs=data.data.filter(row=>row.length>=9&&row[8]==='1').map(row=>({ts:Number(row[0]),open:Number(row[1]),high:Number(row[2]),low:Number(row[3]),close:Number(row[4]),volume:Number(row[5])})).sort((a,b)=>a.ts-b.ts);if(cs.length<30)throw new Error(`已收線 K 線不足（${cs.length} 根）；請確認合約代號或週期。`);render(analyze(cs,fee),inst,bar,fee);setStatus(`分析完成 · 讀取 ${cs.length} 根已收線 K 線 · 資料來自 OKX 公開 API`);}catch(error){setStatus(`讀取失敗：${error.message}。請檢查網路、合約代號，或稍後再試。`,true);}finally{button.disabled=false;button.textContent='分析行情';}}
+  $('refresh').addEventListener('click',load);$('coin').addEventListener('keydown',e=>{if(e.key==='Enter')load();});load();
+})();
+</script>
+</body>
+</html>
+
